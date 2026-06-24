@@ -1,0 +1,227 @@
+{
+  "main": {
+    "id": "5eddf2164a713fec",
+    "type": "split",
+    "children": [
+      {
+        "id": "d0205ce707f0f260",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "7959717bf5db19e2",
+            "type": "leaf",
+            "state": {
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "关系图谱"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "4f305ba6d09e9210",
+    "type": "split",
+    "children": [
+      {
+        "id": "7ed87303da9432c5",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "a798708d458a9a98",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "c8f2e38431b23c73",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "cc52a36f1b74550f",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "20b9dcebea9dea96",
+    "type": "split",
+    "children": [
+      {
+        "id": "a6a8cc4b2d3131bf",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "612260dce9263e1d",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "反向链接"
+            }
+          },
+          {
+            "id": "be55104048267aa5",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "出链"
+            }
+          },
+          {
+            "id": "53d14cdf0c6b07c0",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "1fa83b5764fff0b0",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "932d61b4196c6016",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "大纲"
+            }
+          },
+          {
+            "id": "3d568199f6166817",
+            "type": "leaf",
+            "state": {
+              "type": "footnotes",
+              "state": {},
+              "icon": "lucide-file-signature",
+              "title": "脚注"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false
+    }
+  },
+  "active": "7959717bf5db19e2",
+  "lastOpenFiles": [
+    "company/宏柏新材_EvidencePool.csv",
+    "company/宏柏新材_605366.md",
+    "company/长信科技_300088.md",
+    "company/九安医疗_002432.md",
+    "company/元力股份_300174.md",
+    "球形硅微粉.md",
+    "超级电容炭.md",
+    "元力股份_300174.md",
+    "company/三祥新材_603663.md",
+    "长信科技_300088.md",
+    "玻璃基板.md",
+    "AI算力.md",
+    "TGV玻璃基板.md",
+    "UTG超薄玻璃.md",
+    "concept/TGV玻璃通孔.md",
+    "concept/UTG超薄玻璃.md",
+    "concept/玻璃基板.md",
+    "concept/TSV硅通孔.md",
+    "concept/光器件.md",
+    "concept/semiconductor_equipment_parts.md",
+    "company/华为_未上市.md",
+    "concept/芯片.md",
+    "concept/光通信.md",
+    "concept/陶瓷材料.md",
+    "concept/铜.md",
+    "concept/PEEK材料.md",
+    "supply_chain",
+    "technology",
+    "commercial_space_industry_graph.json",
+    "_meta/company_code_map.json",
+    "concept/knowledgeGraph/_meta",
+    "concept/knowledgeGraph",
+    "_archive",
+    "index",
+    "topic"
+  ]
+}

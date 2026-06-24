@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# 敏感配置
+.env
+*.token
+.secret_key
+config.local.py
+
+# 数据库 (本地运行时生成, 不入库)
+data/*.db
+*.db-journal
+
+# 缓存
+.cache/
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+logs/
+
+# 临时输出
+tmp/
+output/

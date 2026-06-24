@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 - 筹码峰量化平台{% endblock %}
+{% block extra_head %}
+<style>
+    .stock-card { cursor: pointer; transition: transform .2s, box-shadow .2s; }
+    .stock-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(59,130,246,.3); }
+    .stock-row td:first-child { font-weight: 600; cursor: pointer; color: var(--accent); }
+    .stock-row td:first-child:hover { text-decoration: underline; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-3"><div class="card"><div class="card-body text-center"><div class="stat-value text-green">{{ watchlist|length }}</div><div class="stat-label">自选股</div></div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body text-center"><div class="stat-value text-yellow" id="statAnalyzed">-</div><div class="stat-label">已分析</div></div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body text-center"><div class="stat-value" id="statSignals">-</div><div class="stat-label">今日信号</div></div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body text-center"><div class="stat-value" id="statBacktests">-</div><div class="stat-label">回测次数</div></div></div></div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>⭐ 选股池</span>
+                <a href="/watchlist" class="btn btn-sm btn-outline-primary">管理</a>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0" id="watchlistTable">
+                    <thead><tr><th>代码</th><th>名称</th><th>类型</th><th>最新分析</th><th>筹码信号</th><th>操作</th></tr></thead>
+                    <tbody>
+                        {% if watchlist %}
+                        {% for s in watchlist %}
+                        <tr class="stock-row">
+                            <td onclick="window.location='/analysis/{{ s.ts_code }}'">{{ s.ts_code }}</td>
+                            <td>{{ s.name or '-' }}</td>
+                            <td><span class="badge bg-secondary">{{ s.category or '未分类' }}</span></td>
+                            <td class="latest-date" data-code="{{ s.ts_code }}">加载中...</td>
+                            <td class="chip-signal" data-code="{{ s.ts_code }}">-</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary analyze-btn" data-code="{{ s.ts_code }}">分析</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr><td colspan="6" class="text-center text-muted py-4">暂无自选股，去 <a href="/watchlist">选股池</a> 添加</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">🔍 快速分析</div>
+            <div class="card-body">
+                <form id="quickAnalyzeForm">
+                    <div class="mb-2">
+                        <input type="text" class="form-control bg-dark text-light border-secondary" id="quickCode" placeholder="股票代码 (如 000066.SZ)" required>
+                    </div>
+                    <div class="mb-2">
+                        <input type="number" class="form-control bg-dark text-light border-secondary" id="quickDays" value="14" min="5" max="60">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">🚀 一键分析</button>
+                </form>
+                <div id="quickResult" class="mt-3" style="display:none"></div>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">📋 最近回测</div>
+            <div class="card-body" id="recentBacktests">
+                <p class="text-muted text-center">加载中...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// 加载统计数据
+fetch('/api/backtest/runs?limit=5').then(r=>r.json()).then(data => {
+    document.getElementById('statBacktests').textContent = data.length;
+    let html = '';
+    data.slice(0,5).forEach(r => {
+        html += `<div class="mb-2 pb-2 border-bottom border-secondary" style="font-size:.85rem">
+            <strong>${r.ts_code}</strong> ${r.signal_type}<br>
+            胜率 <span class="${r.win_rate>50?'text-green':'text-red'}">${r.win_rate}%</span>
+            | 收益 <span class="${r.total_return>0?'text-green':'text-red'}">${formatPct(r.total_return)}</span>
+            | Sharpe ${r.sharpe}
+        </div>`;
+    });
+    document.getElementById('recentBacktests').innerHTML = html || '<p class="text-muted text-center">暂无回测</p>';
+});
+
+// 加载最新快照日期
+document.querySelectorAll('.latest-date').forEach(el => {
+    const code = el.dataset.code;
+    fetch(`/api/snapshots/${code}?limit=1`).then(r=>r.json()).then(snaps => {
+        el.textContent = snaps.length ? snaps[0].trade_date : '未分析';
+    });
+});
+
+// 快速分析
+document.getElementById('quickAnalyzeForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const code = document.getElementById('quickCode').value.trim();
+    const days = document.getElementById('quickDays').value;
+    if(!code) return;
+    const btn = e.target.querySelector('button');
+    btn.disabled = true; btn.textContent = '分析中...';
+    try {
+        const res = await fetch(`/api/analyze/${code}?days=${days}`);
+        const data = await res.json();
+        const div = document.getElementById('quickResult');
+        div.style.display = 'block';
+        if(data.error) { div.innerHTML = `<div class="alert alert-danger">${data.error}</div>`; return; }
+        const ps = data.price_summary, dv = data.divergence_signals||{}, lk = (data.chip_evolution||{}).locking_assessment||{};
+        div.innerHTML = `<div class="card bg-dark border-secondary"><div class="card-body p-2" style="font-size:.85rem">
+            <strong>${data.meta.ts_code}</strong> | 收盘 <span class="text-green">${ps.latest_close}</span> | 区间 ${formatPct(ps.period_pct)}
+            <hr class="my-1">
+            锁仓: <b>${lk.overall||'-'}</b> | 背离: <b>${dv.verdict||'-'}</b> (${dv.total_score||0})
+            <br><a href="/analysis/${code}" class="btn btn-sm btn-outline-primary mt-1">查看详情 →</a>
+        </div></div>`;
+    } finally {
+        btn.disabled = false; btn.textContent = '🚀 一键分析';
+    }
+});
+
+// 分析按钮
+document.querySelectorAll('.analyze-btn').forEach(btn => {
+    btn.addEventListener('click', () => window.location = `/analysis/${btn.dataset.code}`);
+});
+</script>
+{% endblock %}

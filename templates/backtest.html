@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}回测与进化{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">⚙️ 回测控制</div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <label class="form-label" style="color:var(--muted)">股票代码</label>
+                    <select class="form-select bg-dark text-light border-secondary" id="btCode">
+                        {% for s in watchlist %}
+                        <option value="{{ s.ts_code }}">{{ s.ts_code }} {{ s.name or '' }}</option>
+                        {% endfor %}
+                    </select>
+                    <small style="color:var(--muted)">自定义 <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary d-inline-block w-auto" id="btCustomCode" placeholder="或输入代码"></small>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" style="color:var(--muted)">信号类型</label>
+                    <select class="form-select bg-dark text-light border-secondary" id="btSignal">
+                        <option value="locking">锁仓信号</option>
+                        <option value="divergence">背离信号</option>
+                        <option value="build_divergence">暗中建仓</option>
+                        <option value="dispatch">派发预警</option>
+                    </select>
+                </div>
+                <div class="row mb-2">
+                    <div class="col-6"><label style="color:var(--muted);font-size:.8rem">起始日期</label><input class="form-control bg-dark text-light border-secondary" id="btStart" value="20240101"></div>
+                    <div class="col-6"><label style="color:var(--muted);font-size:.8rem">结束日期</label><input class="form-control bg-dark text-light border-secondary" id="btEnd" value="{{ now }}"></div>
+                </div>
+                <div class="row mb-2">
+                    <div class="col-4"><label style="color:var(--muted);font-size:.75rem">持仓天数</label><input class="form-control bg-dark text-light border-secondary" id="btHold" value="20" type="number"></div>
+                    <div class="col-4"><label style="color:var(--muted);font-size:.75rem">止损%</label><input class="form-control bg-dark text-light border-secondary" id="btStop" value="-8" type="number"></div>
+                    <div class="col-4"><label style="color:var(--muted);font-size:.75rem">止盈%</label><input class="form-control bg-dark text-light border-secondary" id="btProfit" value="20" type="number"></div>
+                </div>
+                <button class="btn btn-primary w-100 mb-2" id="runBacktest">▶️ 运行回测</button>
+                <button class="btn btn-outline-warning w-100" id="runEvolution">🧬 参数进化</button>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">📋 历史回测</div>
+            <div class="card-body p-0" id="historyList" style="max-height:400px;overflow-y:auto">
+                <p class="text-muted text-center p-3">加载中...</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-8">
+        <div id="btLoading" class="text-center py-5" style="display:none"><div class="spinner-border text-primary"></div><p class="mt-2">回测运行中...</p></div>
+        <div id="btResults" style="display:none">
+            <div class="row mb-3" id="btSummary"></div>
+            <div class="card"><div class="card-header">📈 收益曲线</div><div class="card-body"><div class="chart-container" id="chartReturns"></div></div></div>
+            <div class="card mt-2"><div class="card-header">📋 交易明细</div><div class="card-body p-0"><div id="tradeTable" style="max-height:400px;overflow-y:auto"></div></div></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function getCode() { return document.getElementById('btCustomCode').value.trim() || document.getElementById('btCode').value; }
+
+document.getElementById('runBacktest').addEventListener('click', async () => {
+    const code = getCode(); if(!code) return toast('请选择股票','warning');
+    const btn = document.getElementById('runBacktest');
+    btn.disabled = true; document.getElementById('btLoading').style.display = '';
+    document.getElementById('btResults').style.display = 'none';
+    try {
+        const res = await fetch(`/api/backtest/${code}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+            signal_type: document.getElementById('btSignal').value,
+            start_date: document.getElementById('btStart').value,
+            end_date: document.getElementById('btEnd').value,
+            max_holding_days: parseInt(document.getElementById('btHold').value),
+            stop_loss_pct: parseFloat(document.getElementById('btStop').value),
+            take_profit_pct: parseFloat(document.getElementById('btProfit').value),
+        })});
+        const data = await res.json();
+        renderBacktest(data);
+    } finally { btn.disabled = false; document.getElementById('btLoading').style.display = 'none'; }
+});
+
+document.getElementById('runEvolution').addEventListener('click', async () => {
+    const code = getCode(); if(!code) return toast('请选择股票','warning');
+    if(!confirm('进化引擎将遍历参数组合（约70-125组），每次调用筹码分析API，耗时较长。确定继续？')) return;
+    const btn = document.getElementById('runEvolution');
+    btn.disabled = true; document.getElementById('btLoading').style.display = '';
+    try {
+        const res = await fetch(`/api/evolve/${code}`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+            signal_type: document.getElementById('btSignal').value,
+            start_date: document.getElementById('btStart').value,
+            end_date: document.getElementById('btEnd').value,
+            metric: 'sharpe',
+            holding_params: {max_holding_days:parseInt(document.getElementById('btHold').value), stop_loss_pct:parseFloat(document.getElementById('btStop').value), take_profit_pct:parseFloat(document.getElementById('btProfit').value)}
+        })});
+        const data = await res.json();
+        toast(`进化完成! 最优参数: ${JSON.stringify(data.best_params)} | Sharpe=${data.best_metric_value}`, 'success');
+        loadHistory();
+    } finally { btn.disabled = false; document.getElementById('btLoading').style.display = 'none'; }
+});
+
+function renderBacktest(data) {
+    document.getElementById('btResults').style.display = '';
+    // 摘要
+    document.getElementById('btSummary').innerHTML = `
+        <div class="col-3"><div class="metric-card"><div class="lbl">总交易</div><div class="val">${data.total_trades}</div></div></div>
+        <div class="col-3"><div class="metric-card"><div class="lbl">胜率</div><div class="val ${data.win_rate>=50?'text-green':'text-red'}">${data.win_rate}%</div></div></div>
+        <div class="col-3"><div class="metric-card"><div class="lbl">累计收益</div><div class="val ${data.total_return>=0?'text-green':'text-red'}">${formatPct(data.total_return)}</div></div></div>
+        <div class="col-3"><div class="metric-card"><div class="lbl">Sharpe</div><div class="val">${data.sharpe}</div></div></div>
+        <div class="col-3"><div class="metric-card"><div class="lbl">最大回撤</div><div class="val text-red">${data.max_drawdown}%</div></div></div>
+        <div class="col-3"><div class="metric-card"><div class="lbl">最大盈利</div><div class="val text-green">${formatPct(data.max_return)}</div></div></div>
+        <div class="col-3"><div class="metric-card"><div class="lbl">最大亏损</div><div class="val text-red">${formatPct(data.min_return)}</div></div></div>
+        <div class="col-3"><div class="metric-card"><div class="lbl">平均收益</div><div class="val ${data.avg_return>=0?'text-green':'text-red'}">${formatPct(data.avg_return)}</div></div></div>`;
+
+    // 收益曲线
+    const trades = data.trades||[];
+    let equity = 100, eq = [100];
+    trades.forEach(t => { equity *= (1+t.return_pct/100); eq.push(equity); });
+    Plotly.newPlot('chartReturns', [{
+        x: trades.map(t=>t.entry_date), y: eq, type:'scatter', mode:'lines+markers',
+        line:{color:'#3b82f6',width:2}, marker:{color:'#60a5fa',size:5},
+        name:'策略净值'
+    }], { template:'plotly_dark', margin:{t:10,b:40,l:50,r:20}, height:350 });
+
+    // 交易表格
+    let html = '<table class="table table-sm mb-0"><thead><tr><th>入场</th><th>出场</th><th>入场价</th><th>出场价</th><th>收益</th><th>持有</th><th>原因</th></tr></thead><tbody>';
+    trades.forEach(t => html += `<tr><td>${t.entry_date}</td><td>${t.exit_date}</td><td>${t.entry_price}</td><td>${t.exit_price}</td><td class="${t.return_pct>0?'text-green':'text-red'}">${formatPct(t.return_pct)}</td><td>${t.holding_days}天</td><td>${t.exit_reason}</td></tr>`);
+    html += '</tbody></table>';
+    document.getElementById('tradeTable').innerHTML = html;
+}
+
+function loadHistory() {
+    fetch('/api/backtest/runs?limit=15').then(r=>r.json()).then(runs => {
+        let html = '';
+        runs.forEach(r => html += `<div class="p-2 border-bottom border-secondary" style="font-size:.8rem">
+            <a href="#" onclick="loadBacktestDetail(${r.id})" style="color:var(--accent)">${r.name||r.id}</a>
+            <span class="text-muted">${r.ts_code}</span><br>
+            胜率 ${r.win_rate}% | 累计 ${formatPct(r.total_return)} | Sharpe ${r.sharpe}
+        </div>`);
+        document.getElementById('historyList').innerHTML = html || '<p class="text-muted text-center p-3">暂无回测</p>';
+    });
+}
+loadHistory();
+</script>
+{% endblock %}

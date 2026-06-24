@@ -1,0 +1,20 @@
+# 筹码峰量化投研平台 - 依赖清单
+# Python 3.9+
+
+# Web 框架
+flask>=3.0
+flask-sqlalchemy>=3.1
+
+# 环境变量加载
+python-dotenv>=1.0
+
+# 数据处理
+pandas>=2.0
+numpy>=1.24
+
+# 数据源
+tushare>=1.4
+
+# 可视化
+plotly>=5.18
+kaleido>=0.2

@@ -1,0 +1,334 @@
+{
+  "schema_version": "v2.0",
+  "industry": "commercial_space",
+  "industry_name": "商业航天",
+  "description": "中国商业航天产业链，聚焦运载火箭、卫星制造、发射服务、地面应用",
+  "created_at": "2026-06-20",
+  "updated_at": "2026-06-20",
+  "next_review": "2026-06-27",
+  
+  "nodes": {
+    "rocket_engine_thrust_chamber": {
+      "node_id": "rocket_engine_thrust_chamber",
+      "node_name": "火箭发动机推力室",
+      "category": "midstream",
+      "description": "液体火箭发动机核心部件，承受高温高压燃气，材料需具备耐高温、低周疲劳、高导热性能",
+      "tech_barrier": {
+        "level": "high",
+        "description": "铜铬铌合金材料制备+精密锻造成型+多次试车验证，认证周期2-3年",
+        "key_material": "铜铬铌合金（CuCrNb）",
+        "substitute_materials": ["高温合金", "钛合金"],
+        "certification_cycle": "多次试车+发射验证"
+      },
+      "market_size": {
+        "current_rmb_2025": "约2-3亿元",
+        "forecast_2028": "10-15亿元",
+        "growth_driver": "低轨卫星星座组网（星网/千帆）带动发射需求，2026-2030年预计年均发射100+次"
+      },
+      "players": [
+        {
+          "name": "斯瑞新材",
+          "stock_code": "688102.SH",
+          "role": "材料供应商（铜铬铌合金）+ 组件制造（锻件+推力室内外壁）",
+          "market_position": "国内液体火箭推力室材料主要供应商，民商火箭市占率超40%",
+          "verification": "⭐⭐⭐⭐⭐",
+          "verification_source": "e互动多次确认+蓝箭航天招股书交叉验证",
+          "revenue_2025": "2328.97万元（推力室业务）",
+          "capacity": "500套/年（建设中，截至2025年末累计投资5587万元）",
+          "key_products": ["推力室内壁", "推力室外壁", "喷注器面板", "锻件200吨/年"],
+          "notes": "2025年10月完成定增，募资2.3亿元用于产业化项目一阶段"
+        },
+        {
+          "name": "铂力特",
+          "stock_code": "688333.SH",
+          "role": "3D打印工艺（喷注器面板、喷管）",
+          "market_position": "金属3D打印龙头，商业航天核心工艺供应商",
+          "verification": "⭐⭐⭐⭐⭐",
+          "verification_source": "公司公告确认",
+          "notes": "已为蓝箭、星际荣耀等客户完成多型零部件批产"
+        },
+        {
+          "name": "大族激光",
+          "stock_code": "002008.SZ",
+          "role": "激光焊接（大直径火箭发动机夹层喷管）",
+          "market_position": "机器人全自动激光焊接设备",
+          "verification": "⭐⭐⭐⭐⭐",
+          "verification_source": "公司公告确认",
+          "notes": "蓝箭航天80吨液氧甲烷发动机推力室约800条激光焊缝"
+        }
+      ],
+      "downstream_links": [
+        {
+          "company": "蓝箭航天",
+          "product": "朱雀三号（可复用液氧甲烷火箭，200吨级）",
+          "relation_to_node": "斯瑞新材供应推力室内壁+股东（2000万投资）",
+          "verification": "⭐⭐⭐⭐⭐",
+          "verification_source": "蓝箭航天IPO招股书（上交所2025-12-31受理）",
+          "status": "IPO已中止（2026-03-31，财务资料过期）⚠️",
+          "impact_on_node": "中性：IPO红利消失，但供应链关系不变；若IPO恢复，股权价值重估",
+          "key_dates": {
+            "ipo_accepted": "2025-12-31",
+            "ipo_suspended": "2026-03-31",
+            "first_flight": "2025-12-03（朱雀三号遥一首飞，入轨成功，一级回收失利）"
+          }
+        },
+        {
+          "company": "天兵科技",
+          "product": "天龙三号（大型液体火箭，17-22吨运力）",
+          "relation_to_node": "斯瑞新材是否为供应商？待确认",
+          "verification": "⭐⭐",
+          "verification_source": "韭研公社提及，但无官方确认；天兵科技供应商名单未包含斯瑞新材",
+          "status": "首飞失利（2026-04-03）⚠️",
+          "impact_on_node": "负面：短期发射节奏放缓，归零整改中",
+          "key_dates": {
+            "first_flight_attempt": "2026-04-03",
+            "ipo_filing": "2025-10-17（江苏证监局辅导备案，中信建投）"
+          }
+        },
+        {
+          "company": "中科宇航",
+          "product": "力箭二号（中大型液体火箭，12吨LEO运力）",
+          "relation_to_node": "斯瑞新材：待确认是否为力箭二号推力室供应商",
+          "verification": "⭐⭐⭐",
+          "verification_source": "韭研公社称'独家供应力箭二号推力室内壁'；招股书待查",
+          "status": "IPO已受理（2026-03-31，国泰海通保荐）✅",
+          "impact_on_node": "正面：若招股书确认斯瑞新材为供应商，将形成新催化",
+          "key_dates": {
+            "first_flight": "2026-03-30（成功）",
+            "ipo_accepted": "2026-03-31",
+            "contract_win": "2025年已中标上海垣信一箭18星发射服务"
+          }
+        },
+        {
+          "company": "九州云箭",
+          "product": "液体火箭发动机",
+          "relation_to_node": "斯瑞新材客户（e互动确认）",
+          "verification": "⭐⭐⭐⭐",
+          "verification_source": "斯瑞新材e互动多次确认",
+          "status": "正常运营",
+          "impact_on_node": "正面：稳定的下游客户"
+        },
+        {
+          "company": "深蓝航天",
+          "product": "液体火箭发动机",
+          "relation_to_node": "斯瑞新材客户（e互动确认）",
+          "verification": "⭐⭐⭐⭐",
+          "verification_source": "斯瑞新材e互动多次确认",
+          "status": "正常运营",
+          "impact_on_node": "正面：稳定的下游客户"
+        }
+      ],
+      "expectation_gaps": [
+        {
+          "gap_id": "multi_client_coverage",
+          "theme": "多型号覆盖（蓝箭/九州/深蓝/中科宇航）",
+          "strength": "极强",
+          "market_awareness": "高",
+          "price_in_pct": "60%",
+          "credibility": "⭐⭐⭐⭐",
+          "supporting_tiers": ["T0", "T1", "T4"],
+          "notes": "蓝箭叙事太强，掩盖了多客户分散风险。若蓝箭单一叙事瓦解，多客户验证的价值会凸显"
+        },
+        {
+          "gap_id": "blue_arrow_ipo_downgrade",
+          "theme": "蓝箭IPO已中止（市场仍可能以为进行中）",
+          "strength": "反向强",
+          "market_awareness": "极低",
+          "price_in_pct": "20%",
+          "credibility": "⭐⭐⭐⭐⭐",
+          "supporting_tiers": ["T0"],
+          "notes": "IPO中止是T0级公开信息，但市场叙事可能仍围绕IPO红利。叙事瓦解可能带来杀估值"
+        },
+        {
+          "gap_id": "zhongke_yuhang_verification",
+          "theme": "中科宇航IPO招股书是否确认斯瑞新材供应商",
+          "strength": "中",
+          "market_awareness": "极低",
+          "price_in_pct": "10%",
+          "credibility": "⭐⭐⭐",
+          "supporting_tiers": ["T1"],
+          "notes": "若招股书确认，T0验证完成，预期差升级为'强'。当前仅韭研公社提及，需招股书验证"
+        }
+      ],
+      "key_variables": [
+        {
+          "variable": "蓝箭航天IPO恢复",
+          "current_status": "中止（财务资料过期）",
+          "trigger": "财务资料更新+恢复审核",
+          "impact_on_node": "若恢复，股权红利预期重新激活，利好所有蓝箭供应商节点",
+          "update_date": "2026-03-31"
+        },
+        {
+          "variable": "天兵科技天龙三号复飞",
+          "current_status": "归零整改中",
+          "trigger": "完成归零+新发射窗口",
+          "impact_on_node": "若成功，商业航天信心恢复；若再失败，全行业情绪受挫",
+          "update_date": "2026-04-03"
+        },
+        {
+          "variable": "中科宇航IPO招股书披露",
+          "current_status": "已受理，待披露",
+          "trigger": "招股书公开",
+          "impact_on_node": "若提及斯瑞新材为供应商，将形成新催化；若不提及，需降低预期",
+          "update_date": "2026-03-31"
+        }
+      ]
+    },
+    
+    "optical_module_chip_base": {
+      "node_id": "optical_module_chip_base",
+      "node_name": "光模块芯片基座/壳体",
+      "category": "downstream",
+      "description": "高速光模块（800G/1.6T/3.2T）中用于固定芯片、散热的精密结构件",
+      "tech_barrier": {
+        "level": "medium-high",
+        "description": "需同时满足低热膨胀系数+高导热性能，材料路线：钨铜（主流）→钼铜→铜金刚石（下一代）",
+        "key_materials": ["钨铜", "钼铜", "铜金刚石"],
+        "next_gen": "铜金刚石（散热性能更优，成本待降）"
+      },
+      "market_size": {
+        "current_rmb_2025": "斯瑞新材7380.80万元（仅自身）",
+        "total_market": "估计10-20亿元（2025年，含所有供应商）",
+        "forecast_2028": "50-80亿元（随AI算力需求爆发）",
+        "growth_driver": "AI算力中心建设，800G/1.6T光模块快速渗透"
+      },
+      "players": [
+        {
+          "name": "斯瑞新材",
+          "stock_code": "688102.SH",
+          "role": "芯片基座/壳体供应商（钨铜为主）",
+          "market_position": "国内主要供应商之一",
+          "verification": "⭐⭐⭐⭐⭐",
+          "verification_source": "e互动确认2025年收入7380.80万元，同比+208.29%",
+          "customers": ["环球广电（AOI子公司）", "剑桥科技", "索尔思", "菲尼萨", "东莞讯滔", "天孚通信"],
+          "tech_roadmap": "开发钼铜材料，研发铜金刚石低成本制备工艺（1.6T+储备）",
+          "notes": "e互动确认可满足800G/1.6T速率需求"
+        }
+      ],
+      "expectation_gaps": [
+        {
+          "gap_id": "optical_revenue_surge",
+          "theme": "光模块收入同比+208%，认知度低",
+          "strength": "中",
+          "market_awareness": "低",
+          "price_in_pct": "15%",
+          "credibility": "⭐⭐⭐⭐⭐",
+          "supporting_tiers": ["T0"],
+          "notes": "T0级确认，但市场关注焦点在商业航天，光模块业务被忽视。7380万收入在总营收中占比仍小（2025年营收约15亿），但增速极快"
+        },
+        {
+          "gap_id": "copper_diamond_next_gen",
+          "theme": "铜金刚石下一代技术储备",
+          "strength": "中",
+          "market_awareness": "极低",
+          "price_in_pct": "5%",
+          "credibility": "⭐⭐⭐",
+          "supporting_tiers": ["T0"],
+          "notes": "e互动确认在研发，但具体参数/进度未披露。1.6T以上光模块若规模化，铜金刚石将成为差异化竞争点"
+        }
+      ]
+    },
+    
+    "semiconductor_water_cooling": {
+      "node_id": "semiconductor_water_cooling",
+      "node_name": "半导体设备水冷组件",
+      "category": "downstream",
+      "description": "半导体设备（刻蚀/CVD等）中的水冷散热组件，涉及材料+真空钎焊+精密加工+洁净度",
+      "tech_barrier": {
+        "level": "high",
+        "description": "多技术集成（材料+真空钎焊+机械加工+表面处理+洁净度），验证周期长，准入门槛高",
+        "key_technologies": ["材料制备", "真空钎焊", "超高洁净度", "精密加工"]
+      },
+      "market_size": {
+        "current_rmb": "未披露（斯瑞新材未单独拆分）",
+        "total_market": "估计数亿元（随国产设备替代加速）",
+        "growth_driver": "北方华创等国产设备厂商份额提升，水冷组件国产化替代"
+      },
+      "players": [
+        {
+          "name": "斯瑞新材",
+          "stock_code": "688102.SH",
+          "role": "水冷组件供应商",
+          "market_position": "已通过北方华创验证并批量供货",
+          "verification": "⭐⭐⭐⭐⭐",
+          "verification_source": "2024-09-19 e互动确认+多家媒体报道（界面/财联社/第一财经）",
+          "customers": ["北方华创（龙头客户，已验证）"],
+          "notes": "收入规模未披露，但技术壁垒高，一旦进入供应链替代成本高"
+        }
+      ],
+      "expectation_gaps": [
+        {
+          "gap_id": "semiconductor_water_cooling",
+          "theme": "半导体水冷已通过北方华创验证并供货",
+          "strength": "中",
+          "market_awareness": "低",
+          "price_in_pct": "15%",
+          "credibility": "⭐⭐⭐⭐⭐",
+          "supporting_tiers": ["T0"],
+          "notes": "T0级多次确认，但市场认知几乎为零。收入规模未知，若达数千万级别则超预期"
+        }
+      ]
+    },
+    
+    "nuclear_fusion_components": {
+      "node_id": "nuclear_fusion_components",
+      "node_name": "可控核聚变配套零组件",
+      "category": "cross_industry",
+      "description": "托卡马克/仿星器等核聚变装置中的铜合金配套件，如拉板、热沉、偏滤器等",
+      "tech_barrier": {
+        "level": "high",
+        "description": "耐高温铜合金材料（CuCrNb），需实现整体一次锻造成型，配合聚变装置极端环境",
+        "key_material": "铜铬铌合金（与航天推力室同源）"
+      },
+      "market_size": {
+        "current_rmb": "几乎为零（实验阶段）",
+        "forecast_2040": "万亿级（若商业化成功）",
+        "growth_driver": "EAST/BEST/CFETR/ITER等实验装置建设，能量奇点/星环聚能等私营公司融资"
+      },
+      "players": [
+        {
+          "name": "斯瑞新材",
+          "stock_code": "688102.SH",
+          "role": "铜合金材料供应商（聚变装置拉板/热沉）",
+          "market_position": "国内参与者之一",
+          "verification": "⭐⭐⭐",
+          "verification_source": "研报提及（华源证券等），但公司未直接公告客户名单",
+          "customers": ["新奥科技（待确认）", "星环聚能（待确认）", "能量奇点（待确认）"],
+          "notes": "材料与航天推力室同源，技术可迁移。但核聚变商业化时间极远，当前仅为概念"
+        }
+      ],
+      "expectation_gaps": [
+        {
+          "gap_id": "nuclear_fusion_narrative",
+          "theme": "核聚变概念（材料同源，客户待确认）",
+          "strength": "极强",
+          "market_awareness": "极低",
+          "price_in_pct": "10%",
+          "credibility": "⭐⭐⭐",
+          "supporting_tiers": ["T1", "T4"],
+          "notes": "缺少T0直接确认。客户名称来自研报/产业联盟信息，公司e互动/年报未提及。若未来公告确认，则升级为⭐⭐⭐⭐⭐"
+        }
+      ]
+    }
+  },
+  
+  "industry_macro": {
+    "launch_statistics_2025": {
+      "china_commercial_launches": "预计60+次",
+      "global_launches": "预计260+次",
+      "growth_yoy": "+30%"
+    },
+    "policy_signals": [
+      {
+        "policy": "低轨卫星星座组网加速",
+        "source": "国家星网/千帆星座",
+        "impact": "带动发射需求，利好火箭产业链"
+      },
+      {
+        "policy": "商业航天发射许可放宽",
+        "source": "发改委/工信部",
+        "impact": "降低准入门槛，鼓励民营企业参与"
+      }
+    ]
+  }
+}

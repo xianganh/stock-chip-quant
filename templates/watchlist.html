@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+{% block title %}选股池管理{% endblock %}
+{% block extra_head %}
+<style>
+    .notes-cell { max-width: 200px; cursor: pointer; }
+    .notes-cell:hover { background: rgba(59,130,246,.1); }
+    .category-badge { cursor: pointer; }
+    /* 股票反查下拉建议 */
+    .suggest-panel {
+        position: absolute;
+        z-index: 100;
+        top: 100%; left: 0; right: 0;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        max-height: 240px;
+        overflow-y: auto;
+        display: none;
+        box-shadow: 0 4px 12px rgba(0,0,0,.4);
+    }
+    .suggest-panel.active { display: block; }
+    .suggest-item {
+        padding: 6px 10px;
+        cursor: pointer;
+        border-bottom: 1px solid var(--border);
+        font-size: .85rem;
+    }
+    .suggest-item:hover { background: rgba(59,130,246,.2); }
+    .suggest-item:last-child { border-bottom: none; }
+    .suggest-item .code { color: var(--accent); font-weight: 600; }
+    .suggest-item .meta { color: var(--muted); font-size: .75rem; margin-left: 6px; }
+    .lookup-hint-ok { color: var(--green); }
+    .lookup-hint-err { color: var(--red); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">➕ 添加股票</div>
+            <div class="card-body">
+                <form id="addStockForm">
+                    <div class="mb-2">
+                        <label class="form-label" style="color:var(--muted)">股票代码 <small class="text-muted">(或输入名称自动反查代码)</small></label>
+                        <div class="position-relative">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" id="addCode" placeholder="如 000066.SZ 或 000066" autocomplete="off">
+                            <div id="addCodeSuggest" class="suggest-panel"></div>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" style="color:var(--muted)">名称 <small class="text-muted">(或输入代码自动反查名称)</small></label>
+                        <div class="position-relative">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" id="addName" placeholder="如 中国长城" autocomplete="off">
+                            <div id="addNameSuggest" class="suggest-panel"></div>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" style="color:var(--muted)">预期差类型</label>
+                        <select class="form-select bg-dark text-light border-secondary" id="addCategory">
+                            <option value="">未分类</option>
+                            <option>涨价逻辑</option>
+                            <option>增量订单</option>
+                            <option>卡脖子环节</option>
+                            <option>周期反转</option>
+                            <option>估值模式调整</option>
+                            <option>政策催化</option>
+                            <option>其他</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" style="color:var(--muted)">逻辑备注
+                            <small class="text-muted">(从知识图谱建议的关键词可点击追加)</small>
+                        </label>
+                        <textarea class="form-control bg-dark text-light border-secondary" id="addNotes" rows="3" placeholder="记录基本面/逻辑面上的预期差..."></textarea>
+                        <div id="kgSuggestPanel" class="mt-1" style="display:none">
+                            <small style="color:var(--muted)">📚 知识图谱建议:</small>
+                            <div id="kgSuggestTags" class="mt-1"></div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">添加</button>
+                    <div id="addLookupHint" class="mt-2 small"></div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-7">
+        <div class="card">
+            <div class="card-header">⭐ 选股池</div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead><tr>
+                        <th>代码</th>
+                        <th>名称</th>
+                        <th>类型</th>
+                        <th>备注</th>
+                        <th style="min-width:120px">📚 图谱</th>
+                        <th>添加时间</th>
+                        <th>操作</th>
+                    </tr></thead>
+                    <tbody id="stockList">
+                        {% for s in stocks %}
+                        <tr id="row-{{ s.ts_code | replace('.','-') }}">
+                            <td><a href="/analysis/{{ s.ts_code }}" style="color:var(--accent)">{{ s.ts_code }}</a></td>
+                            <td>{{ s.name or '-' }}</td>
+                            <td><span class="badge bg-secondary">{{ s.category or '未分类' }}</span></td>
+                            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.notes or '-' }}</td>
+                            <td class="kg-cell" data-code="{{ s.ts_code }}">
+                                <span class="text-muted kg-loading" style="font-size:.75rem">加载中…</span>
+                            </td>
+                            <td style="font-size:.8rem;color:var(--muted)">{{ s.added_date.strftime('%Y-%m-%d') if s.added_date else '-' }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-danger remove-btn" data-code="{{ s.ts_code }}">删除</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+document.getElementById('addStockForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const code = document.getElementById('addCode').value.trim();
+    const name = document.getElementById('addName').value.trim();
+    const category = document.getElementById('addCategory').value;
+    const notes = document.getElementById('addNotes').value.trim();
+    if(!code){ toast('请输入股票代码','warning'); return; }
+    if(!name){ toast('请输入股票名称 (或先在名称栏输入让系统反查)','warning'); return; }
+    const res = await fetch('/api/watchlist', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ts_code:code, name, category, notes})
+    });
+    if(res.ok){ toast('添加成功','success'); setTimeout(()=>location.reload(),500); }
+    else {
+        const err = await res.json().catch(() => ({}));
+        toast(err.error || '添加失败','error');
+    }
+});
+
+document.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const code = btn.dataset.code;
+        if(!confirm(`确认从选股池删除 ${code}?\n\n历史交易和分析数据将保留, 可重新添加。`)) return;
+        const res = await fetch(`/api/watchlist/${encodeURIComponent(code)}`, {method:'DELETE'});
+        if (res.ok) {
+            const data = await res.json();
+            const kept = data.trade_logs_kept > 0 ? `, ${data.trade_logs_kept} 笔历史交易已保留` : '';
+            toast(`已删除 ${data.deleted}${kept}`, 'success');
+            setTimeout(() => location.reload(), 600);
+        } else {
+            const err = await res.json().catch(() => ({}));
+            toast(err.error || '删除失败', 'error');
+        }
+    });
+});
+
+// ── 知识图谱: watchlist 表格内异步加载 tags ──
+async function loadWatchlistKG() {
+    const cells = document.querySelectorAll('.kg-cell');
+    for (const cell of cells) {
+        const code = cell.dataset.code;
+        if (!code) continue;
+        try {
+            const res = await fetch(`/api/knowledge_graph/${encodeURIComponent(code)}`);
+            const data = await res.json();
+            cell.replaceChildren();
+            if (!data.found || !data.tags || !data.tags.length) {
+                const span = document.createElement('span');
+                span.className = 'text-muted';
+                span.style.cssText = 'font-size:.75rem';
+                span.textContent = '—';
+                cell.appendChild(span);
+                continue;
+            }
+            // 最多显示 4 个 tag, 其余隐藏到 title
+            const maxShow = 4;
+            data.tags.slice(0, maxShow).forEach(tag => {
+                const span = document.createElement('span');
+                span.className = 'badge me-1 mb-1 kg-tag';
+                span.style.cssText = 'background:#1e3a8a;color:#93c5fd;font-size:.7rem;';
+                span.textContent = tag;
+                cell.appendChild(span);
+            });
+            if (data.tags.length > maxShow) {
+                const more = document.createElement('span');
+                more.className = 'text-muted';
+                more.style.cssText = 'font-size:.7rem';
+                more.textContent = `+${data.tags.length - maxShow}`;
+                more.title = data.tags.slice(maxShow).join(', ');
+                cell.appendChild(more);
+            }
+            cell.title = '📚 ' + data.name + '\n' + data.tags.join(' · ');
+        } catch (e) {
+            cell.textContent = '—';
+        }
+    }
+}
+// 页面加载完成后异步填充 (不阻塞首屏)
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadWatchlistKG);
+} else {
+    loadWatchlistKG();
+}
+
+// ── 知识图谱建议 ──
+async function loadKGSuggestions(ts_code) {
+    try {
+        const res = await fetch(`/api/knowledge_graph/${encodeURIComponent(ts_code)}`);
+        const data = await res.json();
+        const panel = document.getElementById('kgSuggestPanel');
+        const tagsDiv = document.getElementById('kgSuggestTags');
+        tagsDiv.replaceChildren();
+        if (!data.found || !data.tags || !data.tags.length) {
+            panel.style.display = 'none';
+            return;
+        }
+        data.tags.forEach(tag => {
+            const span = document.createElement('span');
+            span.className = 'badge me-1 mb-1 kg-tag';
+            span.style.cssText = 'background:#1e3a8a;color:#93c5fd;cursor:pointer;';
+            span.textContent = tag;
+            span.title = '点击追加到备注';
+            span.addEventListener('click', () => appendTagToNotes(tag));
+            tagsDiv.appendChild(span);
+        });
+        panel.style.display = 'block';
+    } catch (e) {
+        // 知识图谱不可用, 静默失败
+    }
+}
+
+function appendTagToNotes(tag) {
+    const notesEl = document.getElementById('addNotes');
+    const current = notesEl.value.trim();
+    // 避免重复
+    if (current.includes(tag)) return;
+    const sep = current ? '; ' : '';
+    notesEl.value = current + sep + tag;
+    // 视觉反馈
+    notesEl.style.borderColor = '#22c55e';
+    setTimeout(() => { notesEl.style.borderColor = ''; }, 600);
+}
+
+// ── 股票代码/名称 双向反查 ──
+let lookupTimer = null;
+let lookupSeq = 0;
+const codeInput = document.getElementById('addCode');
+const nameInput = document.getElementById('addName');
+const codeSuggest = document.getElementById('addCodeSuggest');
+const nameSuggest = document.getElementById('addNameSuggest');
+const hintEl = document.getElementById('addLookupHint');
+
+function showSuggest(panel, items, onPick) {
+    panel.replaceChildren();
+    if (!items.length) { panel.classList.remove('active'); return; }
+    items.forEach(s => {
+        const div = document.createElement('div');
+        div.className = 'suggest-item';
+        div.innerHTML = `<span class="code">${s.ts_code}</span> ${s.name}<span class="meta">${s.industry || ''}</span>`;
+        div.addEventListener('mousedown', e => { e.preventDefault(); onPick(s); panel.classList.remove('active'); });
+        panel.appendChild(div);
+    });
+    panel.classList.add('active');
+}
+
+function hideSuggest(panel) {
+    setTimeout(() => panel.classList.remove('active'), 150);  // 延迟,允许点击
+}
+
+async function doLookup(query, mode) {
+    if (!query || query.length < 2) return;
+    const mySeq = ++lookupSeq;
+    try {
+        const res = await fetch(`/api/stock_lookup?q=${encodeURIComponent(query)}&mode=${mode}`);
+        const data = await res.json();
+        if (mySeq !== lookupSeq) return;  // 已被新查询覆盖
+        if (data.error) {
+            hintEl.innerHTML = `<span class="lookup-hint-err">⚠️ ${data.error}</span>`;
+            return;
+        }
+        if (data.length === 0) {
+            hintEl.innerHTML = `<span class="lookup-hint-err">⚠️ 未找到 "${query}"</span>`;
+            return;
+        }
+        // 显示在下拉中
+        if (mode === 'code') {
+            showSuggest(codeSuggest, data, s => {
+                codeInput.value = s.ts_code;
+                nameInput.value = s.name;
+                hintEl.innerHTML = `<span class="lookup-hint-ok">✓ ${s.ts_code} ${s.name}</span>`;
+                // 选中代码时加载知识图谱建议
+                loadKGSuggestions(s.ts_code);
+            });
+            // 同时也填名称
+            if (data.length === 1) {
+                nameInput.value = data[0].name;
+                hintEl.innerHTML = `<span class="lookup-hint-ok">✓ ${data[0].ts_code} ${data[0].name}</span>`;
+                loadKGSuggestions(data[0].ts_code);
+            } else if (data.length > 1) {
+                hintEl.innerHTML = `<span class="lookup-hint-ok">找到 ${data.length} 个匹配, 请选择</span>`;
+            }
+        } else if (mode === 'name') {
+            showSuggest(nameSuggest, data, s => {
+                codeInput.value = s.ts_code;
+                nameInput.value = s.name;
+                hintEl.innerHTML = `<span class="lookup-hint-ok">✓ ${s.ts_code} ${s.name}</span>`;
+            });
+            if (data.length === 1) {
+                codeInput.value = data[0].ts_code;
+                hintEl.innerHTML = `<span class="lookup-hint-ok">✓ ${data[0].ts_code} ${data[0].name}</span>`;
+            } else if (data.length > 1) {
+                hintEl.innerHTML = `<span class="lookup-hint-ok">找到 ${data.length} 个匹配, 请选择</span>`;
+            }
+        }
+    } catch (e) {
+        hintEl.innerHTML = `<span class="lookup-hint-err">⚠️ 查询出错: ${e.message}</span>`;
+    }
+}
+
+function scheduleLookup(value, mode) {
+    if (lookupTimer) clearTimeout(lookupTimer);
+    lookupTimer = setTimeout(() => doLookup(value, mode), 400);
+}
+
+// 代码输入 → 反查名称
+codeInput.addEventListener('input', () => {
+    const v = codeInput.value.trim();
+    if (!v) { hintEl.innerHTML = ''; nameSuggest.classList.remove('active'); codeSuggest.classList.remove('active'); return; }
+    // 简单判断: 是否是数字/代码格式
+    scheduleLookup(v, 'code');
+});
+codeInput.addEventListener('blur', () => hideSuggest(codeSuggest));
+
+// 名称输入 → 反查代码
+nameInput.addEventListener('input', () => {
+    const v = nameInput.value.trim();
+    if (!v) { hintEl.innerHTML = ''; codeSuggest.classList.remove('active'); nameSuggest.classList.remove('active'); return; }
+    scheduleLookup(v, 'name');
+});
+nameInput.addEventListener('blur', () => hideSuggest(nameSuggest));
+
+// ── 编辑功能 ──
+async function updateStock(code, fields) {
+    const res = await fetch(`/api/watchlist/${code}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(fields)
+    });
+    if (res.ok) { toast('已更新', 'success'); location.reload(); }
+    else { const err = await res.json(); toast(err.error || '更新失败', 'error'); }
+}
+
+document.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const code = btn.dataset.code;
+        const row = btn.closest('tr');
+        const notes = row.querySelector('.notes-cell')?.dataset.current || '';
+        const category = row.querySelector('.category-badge')?.dataset.current || '';
+        const newNotes = prompt(`编辑 ${code} 的备注：`, notes);
+        if (newNotes === null) return;
+        const newCategory = prompt(`编辑 ${code} 的分类（涨价逻辑/增量订单/卡脖子环节/周期反转/估值模式调整/政策催化/其他）：`, category);
+        if (newCategory === null) return;
+        updateStock(code, {notes: newNotes, category: newCategory});
+    });
+});
+
+document.querySelectorAll('.notes-cell').forEach(cell => {
+    cell.addEventListener('click', () => {
+        const code = cell.dataset.code;
+        const current = cell.dataset.current || '';
+        const newVal = prompt(`编辑 ${code} 的备注：`, current);
+        if (newVal !== null && newVal !== current) {
+            updateStock(code, {notes: newVal});
+        }
+    });
+});
+
+document.querySelectorAll('.category-badge').forEach(badge => {
+    badge.addEventListener('click', () => {
+        const code = badge.dataset.code;
+        const current = badge.dataset.current || '';
+        const newVal = prompt(`编辑 ${code} 的分类：`, current);
+        if (newVal !== null && newVal !== current) {
+            updateStock(code, {category: newVal});
+        }
+    });
+});
+</script>
+{% endblock %}

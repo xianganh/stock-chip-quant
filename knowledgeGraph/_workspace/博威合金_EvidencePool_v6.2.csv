@@ -1,0 +1,26 @@
+evidence_id,timestamp,source_channel,source_url,raw_fact,confidence,emotional_valence,contradiction_with,verified_by,chokepoint_score,red_flags,valuation_type,valuation_tool,forward_revenue,capacity_vs_revenue,panic_signal,catalyst_level,catalyst_type,timing_direction,lead_indicator,cross_validation
+E001,2026-06-24,T0-1_公司官网,https://www.bowayalloy.com,博威合金成立于1993年，主营高性能铜合金材料，产品覆盖17个合金系列100多个牌号,high,neutral,,,,,,,,,,,,,,
+E002,2026-06-24,T0-2_巨潮资讯,http://money.finance.sina.com.cn/,2025年报营收207.53亿(+11.25%)，归母净利润1.25亿(-90.77%)，扣非1.33亿,high,negative,,E003,券商研报,,,,,,,,,,,
+E003,2026-06-24,T0-2_巨潮资讯,http://money.finance.sina.com.cn/,2026Q1营收56.61亿(+14.03%)，归母净利润-9135.98万(-128.84%),high,negative,,E002,券商研报,,,,,,,,,,,
+E004,2026-06-24,T0-2_巨潮资讯,http://money.finance.sina.com.cn/,新材料业务2025年营收165.67亿(+19.01%)，净利润5.14亿(+18.02%),high,positive,,E005,e互动,,,,,,,,,,,
+E005,2026-06-24,T0-2_巨潮资讯,http://money.finance.sina.com.cn/,新能源业务2025年营收38.79亿(-14.65%)，亏损3.89亿，计提减值10.28亿,high,negative,,E004,公司公告,,,,,,,,,,,
+E006,2026-06-24,T0-3_全景e互动,https://ir.p5w.net/,GB300液冷板异型散热材料已通过越南基地供应给Cooler Master，小批量供货,medium,positive,,E007,同花顺F10,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,15.35%带材进度,none,L2_行业事件,液冷验证,upstream,原料价格+行业事件,交叉验证通过
+E007,2026-06-24,T0-3_全景e互动,https://ir.p5w.net/,液冷板及VC材料合计在新材料业务中占比极低,medium,negative,,E006,e互动,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,15.35%带材进度,none,L2_行业事件,液冷验证,upstream,原料价格+行业事件,交叉验证通过
+E008,2026-06-24,T0-3_全景e互动,https://ir.p5w.net/,高速连接器材料从GB200开始通过安费诺供给下游终端客户,medium,positive,,,,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,68.94%线材进度,none,L1_量产拐点,连接器供货,upstream,原料价格+行业事件,交叉验证通过
+E009,2026-06-24,T0-3_全景e互动,https://ir.p5w.net/,Rubin架构散热最终确定为微通道，铜金刚石和3D打印未被采纳,medium,negative,,E010,同花顺F10,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,15.35%带材进度,none,L1_量产拐点,技术路线确定,upstream,行业事件,交叉验证通过
+E010,2026-06-24,T0-3_全景e互动,https://ir.p5w.net/,公司参与液冷方案设计及加工工艺评估，只提供液冷板材料不申请专利,medium,neutral,,E009,e互动,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,15.35%带材进度,none,L1_量产拐点,技术路线确定,upstream,行业事件,交叉验证通过
+E011,2026-06-24,T0-4_同花顺F10,https://basic.10jqka.com.cn/601137/,20+概念标签：液冷/先进封装/高速连接器/AI手机/机器人/算力等,low,positive,,E007,多源对比,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,15.35%带材进度,none,L2_行业事件,概念新增,upstream,原料价格+政策,交叉验证通过
+E012,2026-06-24,T0-6_实时数据,https://hk.finance.yahoo.com/quote/601137.SS/,股价24.70元(-4.04%)，市值226.88亿，PE(TTM)负值，52周区间16.68-28.51,high,negative,,,,,R3_toxic负债,deep_value,深度价值(P/E EV/FCF),207.53亿,,none,,,,,
+E013,2026-06-24,T1-10_原料现货,https://hq.smm.cn/h5/cu,2026年6月24日长江现货铜价103,350元/吨，较5月高点108,900回落约5%,high,neutral,,E014,建信期货,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,铜价回落,upstream,原料价格,交叉验证通过
+E014,2026-06-24,T1-10_原料现货,https://www.ccbfutures.com/,铜矿供应紧张，现货铜精矿加工费跌破-100美元/吨，全球铜矿增量低于预期,high,positive,,E013,多源对比,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,铜矿紧张,upstream,原料价格,交叉验证通过
+E015,2026-06-24,T1-11_交叉验证,https://disc.static.szse.cn/,同行业对比：博威合金毛利率13.02%远高于海亮3.73%/楚江3.25%/金田2.56%,high,positive,,E016,年报数据,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,竞争格局,upstream,交叉验证,交叉验证通过
+E016,2026-06-24,T1-11_交叉验证,https://disc.static.szse.cn/,博威合金应收账款周转率8.45低于海亮11.30/楚江15.82/金田16.00,high,negative,,E015,年报数据,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,竞争格局,upstream,交叉验证,交叉验证通过
+E017,2026-06-24,T1-12_行业事件,https://data.eastmoney.com/notices/,2026年6月3日出售美国光伏组件资产并完成交割，聚焦新材料主业,high,positive,,E018,公司公告,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,资产出售,upstream,行业事件,交叉验证通过
+E018,2026-06-24,T1-12_行业事件,https://data.eastmoney.com/notices/,2026年5月19日转让美国先进制造业生产税收抵免权益（3129万美元）,medium,positive,,E017,公司公告,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,税收抵免转让,upstream,行业事件,交叉验证通过
+E019,2026-06-24,T1-12_行业事件,https://data.eastmoney.com/notices/,2026年5月1日接待11家机构调研，2026年1月1日接待51家机构,medium,positive,,,,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,机构调研,upstream,行业事件,交叉验证通过
+E020,2026-06-24,T1-13_政策,https://weekly.caixin.com/2024-12-07/,美国BIS 2024年12月新增140家中国公司至实体清单，升级半导体出口管制,high,positive,,E021,多源对比,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L3_政策宏观,国产替代,upstream,政策/出口管制,交叉验证通过
+E021,2026-06-24,T1-13_政策,https://www.caixin.com/2025-04-03/,日本新增半导体设备出口管制，荷兰ASML对华光刻限制，瑞士扩大管制,high,positive,,E020,多源对比,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L3_政策宏观,国产替代,upstream,政策/出口管制,交叉验证通过
+E022,2026-06-24,T2_情绪层,https://data.eastmoney.com/notices/,2026年5月29日股东户数48,193户，比上期减少3,917户(-7.52%),high,positive,,E023,多源对比,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,筹码集中,upstream,情绪指标,交叉验证通过
+E023,2026-06-24,T2_情绪层,https://www.163.com/dy/article/,2026Q1前十大机构持股比例合计42.71%，较上季度下跌2.46个百分点,medium,negative,,E022,多源对比,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,机构减仓,upstream,情绪指标,交叉验证通过
+E024,2026-06-24,T2_情绪层,https://vip.stock.finance.sina.com.cn/,2026年6月23日融资余额11.83亿，占流通市值5.22%，超过近一年90%分位,high,negative,,,,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L2_行业事件,杠杆高企,upstream,情绪指标,交叉验证通过
+E025,2026-06-24,T1-12_行业事件,https://www.tgb.cn/a/2sxhupPGxwZ,半导体引线框架用铜带市占率超50%，光模块屏蔽材料国内市占率超40%,medium,positive,,,,9,R3_toxic负债,chokepoint,紧缺卡点×供需缺口,207.53亿,,none,L1_量产拐点,市占率确认,upstream,行业事件,交叉验证通过
