@@ -5,6 +5,56 @@
 
 ---
 
+## 2026-06-24 (late session) — Phase 3 启动 + 复盘中心 MVP
+
+### 完成
+- ✅ 算法信号回放引擎: `engine/replay_engine.py` (v2 性能优化版)
+  - 每只股票只拉一次 Tushare 数据 (~0.5s/股)
+  - 内存切片 + 离线计算 (~0.2s/日)
+  - 性能: 1.02s/position, 2130 笔预计 36 分钟
+- ✅ 批量回放 CLI: `scripts/batch_replay.py`
+  - 支持 `--ts-codes / --account / --limit / --dry-run`
+  - 写入 `Position.algorithm_signal` (JSON)
+  - 汇总报告 + 逐条详情
+- ✅ 4 个 REST API:
+  - `GET  /api/review/stats` - 偏差分析统计
+  - `GET  /api/review/list` - 回放列表
+  - `GET  /api/review/detail/<id>` - 详情
+  - `POST /api/replay/run` - 触发回放
+- ✅ 复盘 UI: `templates/review.html`
+  - 5 个统计卡片 + 3 个图表 + 3 个有效性表格
+  - 触发回放按钮 + 筛选 (股票代码/账户/数量)
+  - 自动 30s 刷新
+- ✅ 交接文档: `HANDOVER.md` (跨电脑工作)
+- ✅ Git 推送: commit `f3d187e`
+
+### POC 验证 (20 样本)
+- 总数: 20 笔
+- 累计盈亏: **-16.54%**
+- 算法误判: 7 (35.0%)
+- 数据不足: 13 (65.0%)
+
+### 关键发现
+- 🔴 快克智能 603203: 算法持有 80% → 实际 -4.32% (误判)
+- 🟡 立昂微 605358: 算法观望 → 实际 +7.78% (错失)
+- ⚠️ 65% data_insufficient: 持仓期短 / 数据边缘
+
+### 测试
+- POC 验证通过
+- 38 个 pytest 仍全部通过 (未新增)
+- 17 → 21 个 API 端点 (+4)
+
+### 下一步: M3-M7
+- M3 回测增强 (多策略对比 + 参数敏感性)
+- M5 性能优化 (异步任务)
+- M6 测试覆盖 (新增 20 个 pytest)
+- 调优算法阈值 (基于偏差统计)
+
+详细路线图见 [docs/CodeWiki/12_phase3_roadmap.md](docs/CodeWiki/12_phase3_roadmap.md)
+跨电脑工作流见 [HANDOVER.md](HANDOVER.md)
+
+---
+
 ## 2026-06-24 — Phase 1 完成 + 文档化
 
 ### 完成
