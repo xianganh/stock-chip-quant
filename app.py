@@ -124,6 +124,285 @@ def watchlist_page():
     return render_template("watchlist.html", stocks=stocks)
 
 
+# ══════════════════════════════════════════════════════
+# 复盘中心 (Phase 3)
+# ══════════════════════════════════════════════════════
+
+@app.route("/review")
+def review_page():
+    """复盘中心 - 偏差分析仪表板"""
+    return render_template("review.html")
+
+
+@app.route("/api/review/stats", methods=["GET"])
+def api_review_stats():
+    """
+    复盘统计总览
+
+    返回:
+      - total: 已回放 position 数
+      - algorithmic_agree / disagree / warn / data_insufficient: 偏差分布
+      - by_action: 入场 Action 分布
+      - by_outcome: 实际盈亏分布
+      - by_lock_score: 按锁仓评分分组的胜率
+      - by_dispatch_score: 按派发评分分组的胜率
+      - by_tpc_bucket: 按 TPC 分桶的胜率
+    """
+    positions = Position.query.filter(Position.algorithm_signal.isnot(None)).all()
+    if not positions:
+        return jsonify({"error": "尚无回放数据，请先运行批量回放", "total": 0})
+
+    stats = {
+        "total": len(positions),
+        "algorithmic_agree": 0,
+        "algorithmic_disagree": 0,
+        "algorithmic_warn": 0,
+        "data_insufficient": 0,
+        "by_action": {},
+        "by_outcome": {},
+        "by_lock_score": {},
+        "by_dispatch_score": {},
+        "by_tpc_bucket": {},
+        "total_pnl": 0,
+    }
+
+    for p in positions:
+        if not p.algorithm_signal:
+            continue
+        try:
+            sig = json.loads(p.algorithm_signal)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        dev = sig.get("deviation", {})
+        verdict = dev.get("verdict", "data_insufficient")
+        if verdict in stats:
+            stats[verdict] += 1
+
+        # Action 分布
+        entry = sig.get("entry_signal", {})
+        action = entry.get("action", "unknown") if entry else "unknown"
+        stats["by_action"][action] = stats["by_action"].get(action, 0) + 1
+
+        # Outcome 分布
+        pnl = p.realized_pnl_pct or 0
+        if pnl > 2:
+            outcome = "盈利"
+        elif pnl < -2:
+            outcome = "亏损"
+        else:
+            outcome = "持平"
+        stats["by_outcome"][outcome] = stats["by_outcome"].get(outcome, 0) + 1
+        stats["total_pnl"] += pnl
+
+        # 按入场日锁仓评分分组
+        lock_score = "?"
+        if entry and entry.get("scores"):
+            lock_tuple = entry["scores"].get("lock", [0, 6])
+            lock_score = f"{lock_tuple[0]}/{lock_tuple[1]}"
+        if lock_score not in stats["by_lock_score"]:
+            stats["by_lock_score"][lock_score] = {"count": 0, "pnl_sum": 0, "win_count": 0}
+        stats["by_lock_score"][lock_score]["count"] += 1
+        stats["by_lock_score"][lock_score]["pnl_sum"] += pnl
+        if pnl > 0:
+            stats["by_lock_score"][lock_score]["win_count"] += 1
+
+        # 按派发评分分组
+        dispatch = "?"
+        if entry and entry.get("scores"):
+            dispatch = entry["scores"].get("dispatch", 0)
+        dispatch_bucket = f"D{dispatch}"
+        if dispatch_bucket not in stats["by_dispatch_score"]:
+            stats["by_dispatch_score"][dispatch_bucket] = {"count": 0, "pnl_sum": 0, "win_count": 0}
+        stats["by_dispatch_score"][dispatch_bucket]["count"] += 1
+        stats["by_dispatch_score"][dispatch_bucket]["pnl_sum"] += pnl
+        if pnl > 0:
+            stats["by_dispatch_score"][dispatch_bucket]["win_count"] += 1
+
+        # 按 TPC 分桶
+        tpc = 0
+        if entry and entry.get("scores"):
+            tpc = entry["scores"].get("tpc", 0)
+        tpc_bucket = f"{int(tpc // 5) * 5}-{int(tpc // 5) * 5 + 5}%"
+        if tpc_bucket not in stats["by_tpc_bucket"]:
+            stats["by_tpc_bucket"][tpc_bucket] = {"count": 0, "pnl_sum": 0, "win_count": 0}
+        stats["by_tpc_bucket"][tpc_bucket]["count"] += 1
+        stats["by_tpc_bucket"][tpc_bucket]["pnl_sum"] += pnl
+        if pnl > 0:
+            stats["by_tpc_bucket"][tpc_bucket]["win_count"] += 1
+
+    # 计算胜率
+    for group in [stats["by_lock_score"], stats["by_dispatch_score"], stats["by_tpc_bucket"]]:
+        for k, v in group.items():
+            if v["count"] > 0:
+                v["win_rate"] = round(v["win_count"] / v["count"] * 100, 1)
+                v["avg_pnl"] = round(v["pnl_sum"] / v["count"], 2)
+            else:
+                v["win_rate"] = 0
+                v["avg_pnl"] = 0
+
+    return jsonify(stats)
+
+
+@app.route("/api/review/list", methods=["GET"])
+def api_review_list():
+    """获取所有已回放 position 的列表"""
+    account = request.args.get("account")
+    verdict_filter = request.args.get("verdict")
+    limit = request.args.get("limit", 100, type=int)
+
+    query = Position.query.filter(Position.algorithm_signal.isnot(None))
+    if account:
+        query = query.filter_by(account=account)
+
+    positions = query.order_by(Position.entry_date.desc()).limit(limit).all()
+
+    results = []
+    for p in positions:
+        if not p.algorithm_signal:
+            continue
+        try:
+            sig = json.loads(p.algorithm_signal)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        dev = sig.get("deviation", {})
+        if verdict_filter and dev.get("verdict") != verdict_filter:
+            continue
+
+        entry = sig.get("entry_signal", {})
+        results.append({
+            "id": p.id,
+            "ts_code": p.ts_code,
+            "name": p.name or "",
+            "account": p.account or "",
+            "entry_date": p.entry_date,
+            "exit_date": p.exit_date,
+            "entry_action": entry.get("action", "?") if entry else "?",
+            "entry_confidence": entry.get("confidence", 0) if entry else 0,
+            "actual_pnl_pct": p.realized_pnl_pct or 0,
+            "deviation_verdict": dev.get("verdict", "?"),
+            "actual_outcome": dev.get("actual_outcome", "?"),
+            "holding_days": sig.get("holding_days", 0),
+            "replayed_at": sig.get("replayed_at", ""),
+        })
+
+    return jsonify(results)
+
+
+@app.route("/api/review/detail/<int:position_id>", methods=["GET"])
+def api_review_detail(position_id):
+    """获取单个 position 的完整回放详情"""
+    pos = Position.query.get(position_id)
+    if not pos or not pos.algorithm_signal:
+        return jsonify({"error": "Position 不存在或未回放"}), 404
+
+    try:
+        sig = json.loads(pos.algorithm_signal)
+    except (json.JSONDecodeError, TypeError):
+        return jsonify({"error": "algorithm_signal 数据损坏"}), 500
+
+    return jsonify({
+        "id": pos.id,
+        "ts_code": pos.ts_code,
+        "name": pos.name or "",
+        "account": pos.account or "",
+        "entry_date": pos.entry_date,
+        "exit_date": pos.exit_date,
+        "entry_price": pos.entry_price,
+        "exit_price": pos.exit_price,
+        "realized_pnl_pct": pos.realized_pnl_pct,
+        "signal": sig,
+    })
+
+
+@app.route("/api/replay/run", methods=["POST"])
+def api_replay_run():
+    """
+    触发批量回放 (同步执行，未来可改为异步任务)
+
+    Body:
+      {
+        "ts_codes": ["603773.SH", "603039.SH"],   // 可选，逗号分隔或列表
+        "account": "衡祥安",                       // 可选
+        "status": "closed",                        // 可选
+        "limit": 20,                               // 默认 20
+        "dry_run": false                           // 默认 false
+      }
+    """
+    from utils import normalize_ts_code
+    from engine.replay_engine import ReplayEngine
+
+    data = request.json or {}
+    ts_codes = data.get("ts_codes", "")
+    account = data.get("account", "")
+    status = data.get("status", "closed")
+    limit = data.get("limit", 20)
+    dry_run = data.get("dry_run", False)
+
+    # 筛选 positions
+    query = Position.query.filter(Position.algorithm_signal.is_(None))  # 默认只回放未回放过的
+    if account:
+        query = query.filter_by(account=account)
+    if status:
+        query = query.filter_by(status=status)
+    if ts_codes:
+        if isinstance(ts_codes, str):
+            codes = [normalize_ts_code(c.strip()) for c in ts_codes.split(",")]
+        else:
+            codes = [normalize_ts_code(c) for c in ts_codes]
+        query = query.filter(Position.ts_code.in_(codes))
+    query = query.order_by(Position.entry_date.desc())
+    if limit:
+        query = query.limit(limit)
+    positions = query.all()
+
+    if not positions:
+        return jsonify({"ok": True, "replayed": 0, "message": "没有待回放的 position"})
+
+    engine = ReplayEngine(verbose=False)
+    replayed = 0
+    errors = []
+    for pos in positions:
+        try:
+            ts_code = normalize_ts_code(pos.ts_code)
+            result = engine.replay_position(
+                ts_code=ts_code,
+                entry_date=pos.entry_date,
+                exit_date=pos.exit_date,
+            )
+            if pos.realized_pnl_pct is not None:
+                result.set_actual_pnl(pos.realized_pnl_pct)
+
+            if not dry_run:
+                payload = {
+                    "version": "v1",
+                    "replayed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "entry_signal": result.entry_signal,
+                    "exit_signal": result.exit_signal,
+                    "daily_signals": result.daily_signals,
+                    "action_distribution": result.get_action_distribution(),
+                    "deviation": result.compute_deviation(),
+                    "holding_days": result.holding_days,
+                }
+                pos.algorithm_signal = json.dumps(payload, ensure_ascii=False, default=str)
+                if result.entry_signal:
+                    pos.algorithm_verdict = result.entry_signal.get("action", "")
+            replayed += 1
+        except Exception as e:
+            errors.append({"position_id": pos.id, "ts_code": pos.ts_code, "error": str(e)})
+
+    if not dry_run:
+        db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "replayed": replayed,
+        "errors": errors,
+        "stats": engine.stats,
+    })
+
+
 @app.after_request
 def add_no_cache_headers(response):
     """防止浏览器/IDE Preview 缓存分析页和 API"""

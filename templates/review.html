@@ -1,0 +1,427 @@
+{% extends "base.html" %}
+{% block title %}复盘中心 - 偏差分析{% endblock %}
+
+{% block extra_head %}
+<style>
+.review-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; }
+.stat-tile { background: var(--bg); padding: 1rem; border-radius: 8px; text-align: center; }
+.stat-tile .label { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
+.stat-tile .value { font-size: 1.8rem; font-weight: 700; }
+.verdict-agree { color: #22c55e; }
+.verdict-disagree { color: #ef4444; }
+.verdict-warn { color: #eab308; }
+.verdict-insufficient { color: var(--muted); }
+.bucket-table { width: 100%; font-size: 0.9rem; }
+.bucket-table th, .bucket-table td { padding: 0.4rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); }
+.bucket-table th { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; }
+.bucket-table tr:hover { background: rgba(255,255,255,0.05); }
+.replay-btn { background: var(--accent); color: white; padding: 0.5rem 1.2rem; border-radius: 6px; border: none; cursor: pointer; }
+.replay-btn:hover { background: #2563eb; }
+.replay-btn:disabled { background: var(--muted); cursor: not-allowed; }
+.empty-state { text-align: center; padding: 3rem; color: var(--muted); }
+.collapse-row { display: none; }
+.collapse-row.open { display: table-row; }
+.detail-cell { padding: 1rem; background: var(--bg); font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; }
+.row-disagree { background: rgba(239, 68, 68, 0.1); }
+.row-warn { background: rgba(234, 179, 8, 0.1); }
+.row-agree { background: rgba(34, 197, 94, 0.05); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>📊 复盘中心 - 算法偏差分析</h2>
+    <div>
+      <input id="ts-codes-input" type="text" class="form-control d-inline-block" style="width: 280px;" placeholder="股票代码 (逗号分隔, 留空全部)">
+      <select id="account-filter" class="form-select d-inline-block" style="width: 120px;">
+        <option value="">全部账户</option>
+        <option value="衡祥安">衡祥安</option>
+        <option value="邱磊">邱磊</option>
+      </select>
+      <input id="limit-input" type="number" class="form-control d-inline-block" style="width: 80px;" value="20" min="1" max="500" title="回放数量">
+      <button id="btn-replay" class="replay-btn" onclick="runReplay()">▶ 触发回放</button>
+      <button id="btn-refresh" class="replay-btn" style="background: var(--card); color: var(--accent);" onclick="loadAll()">🔄 刷新</button>
+    </div>
+  </div>
+
+  <!-- 顶部统计卡片 -->
+  <div class="review-card">
+    <h5 class="mb-3">📈 整体统计</h5>
+    <div class="stat-grid" id="overall-stats">
+      <div class="stat-tile"><div class="label">总样本数</div><div class="value" id="stat-total">-</div></div>
+      <div class="stat-tile"><div class="label">累计盈亏</div><div class="value" id="stat-pnl">-</div></div>
+      <div class="stat-tile"><div class="label">算法准确</div><div class="value verdict-agree" id="stat-agree">-</div></div>
+      <div class="stat-tile"><div class="label">算法误判</div><div class="value verdict-disagree" id="stat-disagree">-</div></div>
+      <div class="stat-tile"><div class="label">数据不足</div><div class="value verdict-insufficient" id="stat-insufficient">-</div></div>
+    </div>
+  </div>
+
+  <!-- 三列偏差分析 -->
+  <div class="row">
+    <!-- 入场 Action 分布 -->
+    <div class="col-md-4">
+      <div class="review-card">
+        <h6>🎯 入场 Action 分布</h6>
+        <div id="action-chart" style="height: 240px;"></div>
+      </div>
+    </div>
+
+    <!-- 实际盈亏分布 -->
+    <div class="col-md-4">
+      <div class="review-card">
+        <h6>💰 实际盈亏分布</h6>
+        <div id="outcome-chart" style="height: 240px;"></div>
+      </div>
+    </div>
+
+    <!-- 偏差分布 -->
+    <div class="col-md-4">
+      <div class="review-card">
+        <h6>🎲 算法 vs 实际偏差</h6>
+        <div id="deviation-chart" style="height: 240px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 指标有效性分析 -->
+  <div class="row mt-3">
+    <div class="col-md-4">
+      <div class="review-card">
+        <h6>🔒 锁仓评分胜率</h6>
+        <table class="bucket-table" id="lock-score-table">
+          <thead><tr><th>锁仓评分</th><th>样本</th><th>胜率</th><th>平均盈亏</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="review-card">
+        <h6>⚠️ 派发评分胜率</h6>
+        <table class="bucket-table" id="dispatch-score-table">
+          <thead><tr><th>派发评分</th><th>样本</th><th>胜率</th><th>平均盈亏</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="review-card">
+        <h6>📊 TPC 集中度胜率</h6>
+        <table class="bucket-table" id="tpc-bucket-table">
+          <thead><tr><th>TPC 区间</th><th>样本</th><th>胜率</th><th>平均盈亏</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 详细列表 -->
+  <div class="review-card mt-3">
+    <h5 class="mb-3">📋 逐条详情</h5>
+    <div id="replay-list">
+      <div class="empty-state">
+        <p>暂无数据。点击右上角"触发回放"按钮开始批量回放。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _currentStats = null;
+
+async function loadAll() {
+  await Promise.all([loadStats(), loadList()]);
+}
+
+async function loadStats() {
+  try {
+    const res = await fetch('/api/review/stats');
+    const data = await res.json();
+
+    if (data.error) {
+      document.getElementById('overall-stats').innerHTML =
+        `<div class="empty-state col-12">${data.error}</div>`;
+      return;
+    }
+
+    _currentStats = data;
+
+    // 顶部统计
+    document.getElementById('stat-total').textContent = data.total;
+    document.getElementById('stat-pnl').textContent = data.total_pnl.toFixed(2) + '%';
+    document.getElementById('stat-pnl').className =
+      'value ' + (data.total_pnl > 0 ? 'verdict-agree' : data.total_pnl < 0 ? 'verdict-disagree' : '');
+    document.getElementById('stat-agree').textContent = data.algorithmic_agree + ' (' +
+      (data.total > 0 ? (data.algorithmic_agree / data.total * 100).toFixed(1) : 0) + '%)';
+    document.getElementById('stat-disagree').textContent = data.algorithmic_disagree + ' (' +
+      (data.total > 0 ? (data.algorithmic_disagree / data.total * 100).toFixed(1) : 0) + '%)';
+    document.getElementById('stat-insufficient').textContent = data.data_insufficient + ' (' +
+      (data.total > 0 ? (data.data_insufficient / data.total * 100).toFixed(1) : 0) + '%)';
+
+    // 三列图表
+    renderActionChart(data.by_action);
+    renderOutcomeChart(data.by_outcome);
+    renderDeviationChart({
+      agree: data.algorithmic_agree,
+      disagree: data.algorithmic_disagree,
+      warn: data.algorithmic_warn,
+      insufficient: data.data_insufficient,
+    });
+
+    // 指标有效性表格
+    renderBucketTable('lock-score-table', data.by_lock_score, ['0/6', '1/6', '2/6', '3/6', '4/6', '5/6', '6/6']);
+    renderBucketTable('dispatch-score-table', data.by_dispatch_score, ['D0', 'D1', 'D2', 'D3', 'D4', 'D5']);
+    renderBucketTable('tpc-bucket-table', data.by_tpc_bucket, null);
+
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function loadList() {
+  try {
+    const account = document.getElementById('account-filter').value;
+    let url = '/api/review/list?limit=200';
+    if (account) url += '&account=' + encodeURIComponent(account);
+
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (data.length === 0) {
+      document.getElementById('replay-list').innerHTML =
+        '<div class="empty-state"><p>暂无回放数据</p></div>';
+      return;
+    }
+
+    const html = `
+      <table class="bucket-table">
+        <thead>
+          <tr>
+            <th>股票</th><th>账户</th><th>入场日</th><th>出场日</th>
+            <th>入场判断</th><th>信心度</th>
+            <th>实际盈亏</th><th>实际结果</th>
+            <th>算法评估</th><th>详情</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(p => {
+            const rowClass = p.deviation_verdict === 'algorithmic_agree' ? 'row-agree' :
+                            p.deviation_verdict === 'algorithmic_disagree' ? 'row-disagree' :
+                            p.deviation_verdict === 'algorithmic_warn' ? 'row-warn' : '';
+            const verdictText = {
+              'algorithmic_agree': '✅ 算法准确',
+              'algorithmic_disagree': '❌ 算法误判',
+              'algorithmic_warn': '⚠️ 算法预警',
+              'data_insufficient': '⏳ 数据不足',
+              'no_actual_data': '— 无数据',
+            }[p.deviation_verdict] || p.deviation_verdict;
+            const verdictColor = {
+              'algorithmic_agree': 'verdict-agree',
+              'algorithmic_disagree': 'verdict-disagree',
+              'algorithmic_warn': 'verdict-warn',
+              'data_insufficient': 'verdict-insufficient',
+            }[p.deviation_verdict] || '';
+            return `
+              <tr class="${rowClass}">
+                <td><strong>${p.ts_code}</strong><br><small>${p.name}</small></td>
+                <td>${p.account}</td>
+                <td>${p.entry_date}</td>
+                <td>${p.exit_date || '(active)'}</td>
+                <td><strong>${p.entry_action}</strong></td>
+                <td>${p.entry_confidence}%</td>
+                <td>${p.actual_pnl_pct >= 0 ? '+' : ''}${p.actual_pnl_pct.toFixed(2)}%</td>
+                <td>${p.actual_outcome}</td>
+                <td class="${verdictColor}">${verdictText}</td>
+                <td><button class="btn btn-sm" style="background: var(--card); color: var(--accent); border: 1px solid var(--border);" onclick="toggleDetail(${p.id})">展开</button></td>
+              </tr>
+              <tr id="detail-${p.id}" class="collapse-row">
+                <td colspan="10" class="detail-cell">加载中...</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+    document.getElementById('replay-list').innerHTML = html;
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function toggleDetail(positionId) {
+  const row = document.getElementById(`detail-${positionId}`);
+  if (row.classList.contains('open')) {
+    row.classList.remove('open');
+    return;
+  }
+  row.classList.add('open');
+
+  try {
+    const res = await fetch(`/api/review/detail/${positionId}`);
+    const data = await res.json();
+    if (data.error) {
+      row.querySelector('.detail-cell').textContent = data.error;
+      return;
+    }
+    const sig = data.signal || {};
+    const entry = sig.entry_signal || {};
+    const exit = sig.exit_signal || {};
+    const deviation = sig.deviation || {};
+    const daily = sig.daily_signals || {};
+
+    let text = `股票: ${data.ts_code} ${data.name}\n`;
+    text += `账户: ${data.account}\n`;
+    text += `入场: ${data.entry_date} @ ${data.entry_price} -> 出场: ${data.exit_date || '(active)'} @ ${data.exit_price || '?'}\n`;
+    text += `实际盈亏: ${(data.realized_pnl_pct || 0).toFixed(2)}%\n\n`;
+    text += `=== 入场判断 ===\n`;
+    text += `Action: ${entry.action} | Confidence: ${entry.confidence}% | Color: ${entry.color}\n`;
+    if (entry.reasons) entry.reasons.forEach(r => text += `  - ${r}\n`);
+    text += `\n=== 偏差分析 ===\n`;
+    text += `Algorithm verdict: ${deviation.verdict}\n`;
+    text += `Actual outcome: ${deviation.actual_outcome}\n`;
+    text += `Action distribution: ${JSON.stringify(sig.action_distribution || {})}\n`;
+    text += `\n=== 持有期每日信号 (${Object.keys(daily).length} 天) ===\n`;
+    Object.entries(daily).forEach(([date, s]) => {
+      text += `${date} | ${s.action.padEnd(6)} | ${s.confidence}% | Lock ${(s.scores?.lock || [0,6])[0]}/6 | Disp ${s.scores?.dispatch || 0} | TPC ${(s.scores?.tpc || 0).toFixed(1)}\n`;
+    });
+
+    row.querySelector('.detail-cell').textContent = text;
+  } catch (e) {
+    row.querySelector('.detail-cell').textContent = '加载失败: ' + e.message;
+  }
+}
+
+async function runReplay() {
+  const btn = document.getElementById('btn-replay');
+  btn.disabled = true;
+  btn.textContent = '⏳ 回放中...';
+
+  const ts_codes = document.getElementById('ts-codes-input').value;
+  const account = document.getElementById('account-filter').value;
+  const limit = parseInt(document.getElementById('limit-input').value) || 20;
+
+  try {
+    const res = await fetch('/api/replay/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ts_codes: ts_codes,
+        account: account,
+        limit: limit,
+        dry_run: false,
+      }),
+    });
+    const data = await res.json();
+
+    if (data.replayed > 0) {
+      alert(`回放完成！\n成功: ${data.replayed}\n失败: ${data.errors?.length || 0}\n耗时: ${data.stats?.preload_count || 0} 只股票预加载`);
+      await loadAll();
+    } else {
+      alert(data.message || '没有待回放的 position');
+    }
+  } catch (e) {
+    alert('回放失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ 触发回放';
+  }
+}
+
+// Plotly 图表
+function renderActionChart(byAction) {
+  const entries = Object.entries(byAction);
+  const trace = {
+    x: entries.map(([k]) => k),
+    y: entries.map(([_, v]) => v),
+    type: 'bar',
+    marker: { color: '#3b82f6' },
+  };
+  const layout = {
+    margin: { t: 10, b: 30, l: 30, r: 10 },
+    height: 240,
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { color: '#94a3b8' },
+    xaxis: { gridcolor: '#334155' },
+    yaxis: { gridcolor: '#334155' },
+  };
+  Plotly.newPlot('action-chart', [trace], layout, {displayModeBar: false});
+}
+
+function renderOutcomeChart(byOutcome) {
+  const colorMap = { '盈利': '#22c55e', '持平': '#94a3b8', '亏损': '#ef4444' };
+  const entries = Object.entries(byOutcome);
+  const trace = {
+    labels: entries.map(([k]) => k),
+    values: entries.map(([_, v]) => v),
+    type: 'pie',
+    marker: { colors: entries.map(([k]) => colorMap[k] || '#3b82f6') },
+    hole: 0.4,
+  };
+  const layout = {
+    margin: { t: 10, b: 10, l: 10, r: 10 },
+    height: 240,
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { color: '#94a3b8' },
+    showlegend: true,
+    legend: { orientation: 'h' },
+  };
+  Plotly.newPlot('outcome-chart', [trace], layout, {displayModeBar: false});
+}
+
+function renderDeviationChart(data) {
+  const trace = {
+    labels: ['✅ 算法准确', '❌ 算法误判', '⚠️ 算法预警', '⏳ 数据不足'],
+    values: [data.agree, data.disagree, data.warn, data.insufficient],
+    type: 'pie',
+    marker: { colors: ['#22c55e', '#ef4444', '#eab308', '#94a3b8'] },
+    hole: 0.4,
+  };
+  const layout = {
+    margin: { t: 10, b: 10, l: 10, r: 10 },
+    height: 240,
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { color: '#94a3b8' },
+    showlegend: true,
+    legend: { orientation: 'h' },
+  };
+  Plotly.newPlot('deviation-chart', [trace], layout, {displayModeBar: false});
+}
+
+function renderBucketTable(tableId, bucketData, preferredOrder) {
+  const tbody = document.querySelector(`#${tableId} tbody`);
+  tbody.innerHTML = '';
+
+  let entries = Object.entries(bucketData);
+  if (preferredOrder) {
+    entries.sort((a, b) => {
+      const ai = preferredOrder.indexOf(a[0]);
+      const bi = preferredOrder.indexOf(b[0]);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+  } else {
+    entries.sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]));
+  }
+
+  for (const [key, data] of entries) {
+    const row = document.createElement('tr');
+    const winColor = data.win_rate >= 60 ? 'verdict-agree' : data.win_rate <= 40 ? 'verdict-disagree' : '';
+    const pnlColor = data.avg_pnl >= 0 ? 'verdict-agree' : 'verdict-disagree';
+    row.innerHTML = `
+      <td><strong>${key}</strong></td>
+      <td>${data.count}</td>
+      <td class="${winColor}">${data.win_rate}%</td>
+      <td class="${pnlColor}">${data.avg_pnl >= 0 ? '+' : ''}${data.avg_pnl.toFixed(2)}%</td>
+    `;
+    tbody.appendChild(row);
+  }
+}
+
+// 页面加载时启动
+loadAll();
+setInterval(loadAll, 30000);  // 每 30 秒自动刷新
+</script>
+{% endblock %}
