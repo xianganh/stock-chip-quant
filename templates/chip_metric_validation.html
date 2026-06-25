@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>筹码峰指标回测验证 (定性理论驱动)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --accent: #3b82f6; --green: #22c55e; --red: #ef4444; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+        .navbar { background: var(--card); border-bottom: 1px solid var(--border); padding: 0.5rem 1.5rem; }
+        .navbar-brand { color: var(--accent) !important; font-weight: 700; font-size: 1.2rem; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 1rem; }
+        .card-header { background: transparent; border-bottom: 1px solid var(--border); color: var(--text); font-weight: 600; padding: 0.75rem 1rem; }
+        .stat-value { font-size: 2rem; font-weight: 700; }
+        .stat-label { font-size: 0.8rem; color: var(--muted); }
+        .text-green { color: var(--green); }
+        .text-red { color: var(--red); }
+        .text-blue { color: var(--accent); }
+        .table { color: var(--text); font-size: 0.85rem; }
+        .table thead th { color: var(--muted); border-color: var(--border); }
+        .table td { border-color: var(--border); vertical-align: middle; }
+        .badge-best { background: #14532d; color: #86efac; }
+        .badge-good { background: #854d0e; color: #fcd34d; }
+        .badge-ok { background: #1e40af; color: #93c5fd; }
+        .badge-warn { background: #7f1d1d; color: #fca5a5; }
+        .chart-container { width: 100%; height: 350px; }
+        .loading { text-align: center; padding: 3rem; color: var(--muted); }
+        .form-control, .form-select { background: #0f172a; border-color: var(--border); color: var(--text); }
+        .form-control:focus, .form-select:focus { background: #0f172a; border-color: var(--accent); color: var(--text); box-shadow: 0 0 0 0.2rem rgba(59,130,246,0.25); }
+        .signal-row:hover { background: rgba(59,130,246,0.1); cursor: pointer; }
+        .description-text { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container-fluid">
+            <span class="navbar-brand">📊 筹码峰指标回测验证 (定性理论驱动)</span>
+            <a href="/chip_backtest" class="nav-link" style="color:var(--muted)">← 返回回测图表</a>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-3">
+        <!-- 控制面板 -->
+        <div class="card">
+            <div class="card-header">⚙️ 参数设置</div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">股票代码</label>
+                        <input type="text" class="form-control" id="tsCode" value="603002.SH">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">起始日期</label>
+                        <input type="text" class="form-control" id="startDate" value="20260301">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">结束日期</label>
+                        <input type="text" class="form-control" id="endDate" value="20260624">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">未来天数</label>
+                        <select class="form-select" id="futureDays">
+                            <option value="5">5日</option>
+                            <option value="10" selected>10日</option>
+                            <option value="20">20日</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <button class="btn btn-primary w-100" id="runBtn" onclick="runValidation()">
+                            ▶️ 运行验证
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 加载状态 -->
+        <div id="loading" class="loading" style="display:none;">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2">正在回测验证中，请稍候...</p>
+        </div>
+
+        <!-- 结果区域 -->
+        <div id="results" style="display:none;">
+            <!-- 基准统计 -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">📈 基准统计（全部交易日）</div>
+                        <div class="card-body">
+                            <div class="row text-center" id="baselineStats"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 趋势分布 -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">📊 趋势分布统计</div>
+                        <div class="card-body">
+                            <div class="row text-center" id="trendDistribution"></div>
+                            <div id="trendPieChart" class="chart-container mt-3"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 趋势环境下的单指标验证 -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">📉 趋势环境下的单指标验证</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table" id="trendTable">
+                                    <thead>
+                                        <tr>
+                                            <th>信号名称</th>
+                                            <th>描述</th>
+                                            <th>条件</th>
+                                            <th>信号次数</th>
+                                            <th>胜率</th>
+                                            <th>平均收益</th>
+                                            <th>盈亏比</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 指标动量验证 -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">⚡ 指标动量验证（变化率）</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table" id="momentumTable">
+                                    <thead>
+                                        <tr>
+                                            <th>信号名称</th>
+                                            <th>描述</th>
+                                            <th>条件</th>
+                                            <th>信号次数</th>
+                                            <th>胜率</th>
+                                            <th>平均收益</th>
+                                            <th>盈亏比</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 理论驱动信号组合 -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">🔥 理论驱动信号组合</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table" id="theoryTable">
+                                    <thead>
+                                        <tr>
+                                            <th>信号名称</th>
+                                            <th>描述</th>
+                                            <th>条件</th>
+                                            <th>信号次数</th>
+                                            <th>胜率</th>
+                                            <th>平均收益</th>
+                                            <th>盈亏比</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 健康度评分验证 -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">💯 健康度评分验证</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table" id="healthTable">
+                                    <thead>
+                                        <tr>
+                                            <th>条件</th>
+                                            <th>描述</th>
+                                            <th>信号次数</th>
+                                            <th>胜率</th>
+                                            <th>平均收益</th>
+                                            <th>盈亏比</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 综合排名 TOP10 -->
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">🏆 综合排名 TOP10（胜率+收益）</div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table" id="rankingTable">
+                                    <thead>
+                                        <tr>
+                                            <th>排名</th>
+                                            <th>信号名称</th>
+                                            <th>描述</th>
+                                            <th>信号次数</th>
+                                            <th>胜率</th>
+                                            <th>平均收益</th>
+                                            <th>盈亏比</th>
+                                            <th>最大回撤</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let trendPieChart = null;
+        let validationData = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            trendPieChart = echarts.init(document.getElementById('trendPieChart'));
+            window.addEventListener('resize', () => trendPieChart && trendPieChart.resize());
+        });
+
+        async function runValidation() {
+            const tsCode = document.getElementById('tsCode').value;
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const futureDays = document.getElementById('futureDays').value;
+
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
+
+            try {
+                const url = `/api/metric_validation/${tsCode}?start_date=${startDate}&end_date=${endDate}&future_days=${futureDays}`;
+                const response = await fetch(url);
+                validationData = await response.json();
+
+                if (validationData.error) {
+                    alert('验证失败: ' + validationData.error);
+                    return;
+                }
+
+                renderResults();
+
+            } catch (error) {
+                alert('请求失败: ' + error.message);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('results').style.display = 'block';
+            }
+        }
+
+        function renderResults() {
+            renderBaselineStats();
+            renderTrendDistribution();
+            renderTrendTable();
+            renderMomentumTable();
+            renderTheoryTable();
+            renderHealthTable();
+            renderRankingTable();
+        }
+
+        function renderBaselineStats() {
+            const b = validationData.baseline;
+            const html = `
+                <div class="col-md-3"><div class="stat-value">${validationData.total_samples}</div><div class="stat-label">样本数量</div></div>
+                <div class="col-md-3"><div class="stat-value ${b.win_rate > 50 ? 'text-green' : 'text-red'}">${b.win_rate}%</div><div class="stat-label">基准胜率</div></div>
+                <div class="col-md-3"><div class="stat-value ${b.avg_return > 0 ? 'text-green' : 'text-red'}">${b.avg_return}%</div><div class="stat-label">基准收益</div></div>
+                <div class="col-md-3"><div class="stat-value">${b.profit_loss_ratio}</div><div class="stat-label">基准盈亏比</div></div>
+            `;
+            document.getElementById('baselineStats').innerHTML = html;
+        }
+
+        function renderTrendDistribution() {
+            const t = validationData.trend_distribution;
+            const total = t.up_days + t.down_days + t.side_days;
+            const html = `
+                <div class="col-md-4"><div class="stat-value text-green">${t.up_days}</div><div class="stat-label">上涨趋势天数 (${((t.up_days/total)*100).toFixed(1)}%)</div></div>
+                <div class="col-md-4"><div class="stat-value text-red">${t.down_days}</div><div class="stat-label">下跌趋势天数 (${((t.down_days/total)*100).toFixed(1)}%)</div></div>
+                <div class="col-md-4"><div class="stat-value text-blue">${t.side_days}</div><div class="stat-label">震荡趋势天数 (${((t.side_days/total)*100).toFixed(1)}%)</div></div>
+            `;
+            document.getElementById('trendDistribution').innerHTML = html;
+
+            // 饼图
+            trendPieChart.setOption({
+                tooltip: { trigger: 'item' },
+                legend: { bottom: 0, data: ['上涨趋势', '下跌趋势', '震荡趋势'] },
+                series: [{
+                    type: 'pie',
+                    radius: ['40%', '70%'],
+                    center: ['50%', '40%'],
+                    data: [
+                        { value: t.up_days, name: '上涨趋势', itemStyle: { color: '#22c55e' } },
+                        { value: t.down_days, name: '下跌趋势', itemStyle: { color: '#ef4444' } },
+                        { value: t.side_days, name: '震荡趋势', itemStyle: { color: '#3b82f6' } },
+                    ],
+                    label: { formatter: '{b}: {c}天 ({d}%)' }
+                }]
+            });
+        }
+
+        function renderTrendTable() {
+            const data = validationData.trend_validation || [];
+            renderSignalTable('trendTable', data);
+        }
+
+        function renderMomentumTable() {
+            const data = validationData.momentum_validation || [];
+            renderSignalTable('momentumTable', data);
+        }
+
+        function renderTheoryTable() {
+            const data = validationData.theory_based_signals || [];
+            renderSignalTable('theoryTable', data);
+        }
+
+        function renderHealthTable() {
+            const data = validationData.health_score_validation || [];
+            const tbody = document.getElementById('healthTable').querySelector('tbody');
+            tbody.innerHTML = data.map(s => `
+                <tr class="signal-row">
+                    <td>${s.signal_name}</td>
+                    <td><div>${s.description}</div></td>
+                    <td>${s.signal_count}</td>
+                    <td>${s.win_rate}%</td>
+                    <td class="${s.avg_return > 0 ? 'text-green' : 'text-red'}">${s.avg_return}%</td>
+                    <td>${s.profit_loss_ratio}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderRankingTable() {
+            const data = validationData.all_signals_ranked || [];
+            const tbody = document.getElementById('rankingTable').querySelector('tbody');
+            tbody.innerHTML = data.slice(0, 10).map((s, i) => `
+                <tr class="signal-row">
+                    <td><strong>${i+1}</strong></td>
+                    <td>${s.signal_name}</td>
+                    <td><div>${s.description}</div></td>
+                    <td>${s.signal_count}</td>
+                    <td class="${s.win_rate > 60 ? 'text-green' : s.win_rate > 50 ? 'text-blue' : 'text-red'}">${s.win_rate}%</td>
+                    <td class="${s.avg_return > 0 ? 'text-green' : 'text-red'}">${s.avg_return}%</td>
+                    <td>${s.profit_loss_ratio}</td>
+                    <td class="text-red">${s.max_drawdown}%</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderSignalTable(tableId, data) {
+            const tbody = document.getElementById(tableId).querySelector('tbody');
+            tbody.innerHTML = data.map(s => {
+                const winClass = s.win_rate > 60 ? 'text-green' : s.win_rate > 50 ? 'text-blue' : 'text-red';
+                return `
+                    <tr class="signal-row">
+                        <td>${s.signal_name}</td>
+                        <td><div>${s.description}</div></td>
+                        <td><code class="text-muted" style="font-size:0.75rem">${s.condition}</code></td>
+                        <td>${s.signal_count}</td>
+                        <td class="${winClass}">${s.win_rate}%</td>
+                        <td class="${s.avg_return > 0 ? 'text-green' : 'text-red'}">${s.avg_return}%</td>
+                        <td>${s.profit_loss_ratio}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+    </script>
+</body>
+</html>

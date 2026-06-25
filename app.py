@@ -1242,6 +1242,188 @@ def handle_500(e):
 
 
 # ══════════════════════════════════════════════════════
+# 筹码峰回测可视化 (通用化模块)
+# ══════════════════════════════════════════════════════
+
+@app.route("/chip_backtest")
+def chip_backtest_page():
+    """筹码峰回测可视化页面"""
+    return render_template("chip_backtest_chart.html")
+
+
+@app.route("/api/chip_backtest/<ts_code>", methods=["GET"])
+def api_chip_backtest(ts_code):
+    """
+    运行筹码峰回测并返回完整数据（供前端ECharts展示）
+
+    Query params:
+      start_date: 起始日期 (YYYYMMDD), 默认 20260101
+      end_date: 结束日期 (YYYYMMDD), 默认今天
+    """
+    import sys
+    sys.path.insert(0, os.path.dirname(__file__))
+
+    from chip_data_fetcher import fetch_complete_data, load_trade_records, get_trades_for_stock
+    from chip_indicators import compute_all_chip_metrics
+
+    ts_code = normalize_ts_code(ts_code)
+    start_date = request.args.get("start_date", "20260101")
+    end_date = request.args.get("end_date", datetime.now().strftime("%Y%m%d"))
+
+    try:
+        # 获取数据
+        data = fetch_complete_data(ts_code, start_date, end_date)
+        kline_df = data.get("kline") if isinstance(data, dict) else None
+        if data is None or kline_df is None or (hasattr(kline_df, '__len__') and len(kline_df) == 0):
+            return jsonify({"error": f"未获取到 {ts_code} 的数据"}), 400
+
+        # 计算指标
+        results = compute_all_chip_metrics(
+            data["chip_data"], data["kline"], lookback_days=7
+        )
+
+        # 加载交易记录
+        trades_df = load_trade_records()
+        stock_trades = get_trades_for_stock(trades_df, ts_code)
+
+        # 匹配交易记录到每日结果
+        trade_map = {}
+        for _, trade in stock_trades.iterrows():
+            date_str = trade["date"].strftime("%Y-%m-%d")
+            trade_map.setdefault(date_str, []).append({
+                "action": trade["action"],
+                "price": trade["price"],
+            })
+
+        for r in results:
+            r["trades"] = trade_map.get(r["date"], [])
+
+        # 统计信息
+        scores = [r["score"] for r in results if r["score"] is not None]
+        good_signals = [r for r in results if r["score"] is not None and r["score"] >= 7]
+        good_returns = [r["future_return"] for r in good_signals if r["future_return"] is not None]
+
+        # 交易分析
+        trade_analysis = []
+        for _, trade in stock_trades.iterrows():
+            date_str = trade["date"].strftime("%Y-%m-%d")
+            record = next((r for r in results if r["date"] == date_str), None)
+            analysis = {
+                "date": date_str,
+                "action": trade["action"],
+                "price": trade["price"],
+                "note": trade["note"],
+            }
+            if record and record["score"] is not None:
+                analysis["score"] = record["score"]
+                analysis["status"] = record["status"]
+                analysis["future_return"] = record["future_return"]
+                if trade["action"] == "buy":
+                    if record["score"] >= 10:
+                        analysis["evaluation"] = "⭐优秀"
+                    elif record["score"] >= 7:
+                        analysis["evaluation"] = "✅良好"
+                    elif record["score"] >= 4:
+                        analysis["evaluation"] = "⚠️一般"
+                    else:
+                        analysis["evaluation"] = "❌较差"
+                else:
+                    if record["score"] <= 0:
+                        analysis["evaluation"] = "✅合理"
+                    elif record["score"] <= 4:
+                        analysis["evaluation"] = "⚠️谨慎"
+                    else:
+                        analysis["evaluation"] = "❌过早"
+            else:
+                analysis["evaluation"] = "⚠️数据不足"
+            trade_analysis.append(analysis)
+
+        # 股票名称
+        name = ""
+        try:
+            from utils import get_tushare_pro
+            pro = get_tushare_pro()
+            stock_info = pro.stock_basic(ts_code=ts_code, fields="name")
+            if stock_info is not None and len(stock_info) > 0:
+                name = stock_info.iloc[0]["name"]
+        except Exception:
+            pass
+
+        return json_response({
+            "ts_code": ts_code,
+            "name": name,
+            "period": f"{start_date}~{end_date}",
+            "total_days": len(results),
+            "statistics": {
+                "score_range": {"min": min(scores), "max": max(scores)} if scores else {"min": 0, "max": 0},
+                "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
+                "negative_count": len([s for s in scores if s < 0]),
+                "good_signals": {
+                    "count": len(good_signals),
+                    "accuracy": round(len([r for r in good_returns if r > 0]) / len(good_returns) * 100, 1) if good_returns else 0,
+                    "avg_return": round(sum(good_returns) / len(good_returns), 2) if good_returns else 0,
+                },
+            },
+            "trade_analysis": trade_analysis,
+            "daily_results": results,
+        })
+
+    except Exception as e:
+        import traceback
+        logger.exception("筹码峰回测失败")
+        traceback_str = traceback.format_exc()
+        print(f"[CHIP_BACKTEST ERROR] {traceback_str}")
+        return jsonify({"error": f"回测失败: {str(e)}", "traceback": traceback_str}), 500
+
+
+# ══════════════════════════════════════════════════════
+# 筹码峰指标回测验证 API
+# ══════════════════════════════════════════════════════
+
+@app.route("/metric_validation")
+def metric_validation_page():
+    """筹码峰指标验证页面"""
+    return render_template("chip_metric_validation.html")
+
+
+@app.route("/api/metric_validation/<ts_code>", methods=["GET"])
+def api_metric_validation(ts_code):
+    """
+    筹码峰指标回测验证 API (定性理论驱动)
+
+    在经典量化理论指导下，对各项筹码峰指标进行历史回测验证。
+    返回趋势环境验证、指标动量验证、理论驱动信号组合、健康度评分验证等结果。
+
+    Query params:
+      start_date: 起始日期 (YYYYMMDD), 默认 20260301
+      end_date: 结束日期 (YYYYMMDD), 默认今天
+      future_days: 未来收益验证天数, 默认 10
+    """
+    import sys
+    sys.path.insert(0, os.path.dirname(__file__))
+
+    from chip_metric_validation import QualitativeValidator
+
+    ts_code = normalize_ts_code(ts_code)
+    start_date = request.args.get("start_date", "20260301")
+    end_date = request.args.get("end_date", datetime.now().strftime("%Y%m%d"))
+    future_days = int(request.args.get("future_days", "10"))
+
+    try:
+        validator = QualitativeValidator(ts_code, start_date, end_date, future_days=future_days)
+        validator.fetch_and_compute()
+        report = validator.generate_report()
+
+        return json_response(report)
+
+    except Exception as e:
+        import traceback
+        logger.exception("指标验证失败")
+        traceback_str = traceback.format_exc()
+        return jsonify({"error": f"验证失败: {str(e)}", "traceback": traceback_str}), 500
+
+
+# ══════════════════════════════════════════════════════
 # 主入口
 # ══════════════════════════════════════════════════════
 

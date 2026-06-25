@@ -1,0 +1,660 @@
+{% extends "base.html" %}
+{% block title %}筹码峰回测可视化{% endblock %}
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+    .chart-container {
+        width: 100%;
+        height: 750px;
+        background: #0a0e1a;
+        border-radius: 8px;
+    }
+    .backtest-controls {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    .trade-tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-left: 4px;
+    }
+    .trade-buy { background: #dc2626; color: white; }
+    .trade-sell { background: #16a34a; color: white; }
+    .signal-buy { color: #ff6b6b; font-weight: 700; }
+    .signal-sell { color: #51cf66; font-weight: 700; }
+    .info-panel {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1rem;
+        font-size: 0.85rem;
+    }
+    .info-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 4px 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .info-row:last-child { border-bottom: none; }
+    .score-excellent { color: #22c55e; font-weight: 700; }
+    .score-good { color: #84cc16; font-weight: 600; }
+    .score-normal { color: #eab308; }
+    .score-bad { color: #f97316; }
+    .score-terrible { color: #ef4444; font-weight: 700; }
+    .legend-custom {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        font-size: 0.75rem;
+        color: #94a3b8;
+        padding: 4px 12px;
+    }
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .legend-color {
+        width: 12px;
+        height: 3px;
+        border-radius: 2px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="backtest-controls d-flex align-items-center gap-3 flex-wrap">
+            <div>
+                <label style="color:var(--muted);font-size:.8rem">股票代码</label>
+                <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="codeInput" value="603002.SH" style="width:120px">
+            </div>
+            <div>
+                <label style="color:var(--muted);font-size:.8rem">起始日期</label>
+                <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="startInput" value="20260301" style="width:100px">
+            </div>
+            <div>
+                <label style="color:var(--muted);font-size:.8rem">结束日期</label>
+                <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="endInput" value="20260624" style="width:100px">
+            </div>
+            <div class="d-flex align-items-end">
+                <button class="btn btn-primary btn-sm" id="runBtn">▶️ 运行回测</button>
+            </div>
+            <div class="ms-auto" id="summaryStats" style="display:none">
+                <span class="badge bg-secondary me-2">总交易日: <span id="statDays">-</span></span>
+                <span class="badge bg-success me-2">向好信号: <span id="statGood">-</span></span>
+                <span class="badge bg-info">平均得分: <span id="statAvg">-</span></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-10">
+        <div class="card" style="background:#0a0e1a;border-color:#1e293b;">
+            <div class="card-header d-flex justify-content-between align-items-center" style="background:transparent;border-color:#1e293b;">
+                <span>📈 K线 + 筹码健康度 + 关键指标</span>
+                <small style="color:var(--muted)" id="chartSubtitle">宏昌电子 603002.SH</small>
+            </div>
+            <div class="card-body p-0">
+                <div id="mainChart" class="chart-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-2">
+        <!-- 选中日期详情 -->
+        <div class="info-panel mb-3">
+            <h6 style="color:var(--accent);margin-bottom:12px;">📅 选中日期</h6>
+            <div id="dayDetail">
+                <p class="text-muted text-center">点击图表查看详情</p>
+            </div>
+        </div>
+
+        <!-- 交易记录 -->
+        <div class="info-panel">
+            <h6 style="color:var(--accent);margin-bottom:12px;">🎯 交易记录</h6>
+            <div id="tradeList" style="max-height:400px;overflow-y:auto;">
+                <p class="text-muted text-center">暂无数据</p>
+            </div>
+        </div>
+
+        <!-- 图例说明 -->
+        <div class="info-panel mt-3">
+            <h6 style="color:var(--accent);margin-bottom:8px;font-size:0.8rem;">📋 图例</h6>
+            <div class="legend-custom">
+        <div class="legend-item"><div class="legend-color" style="background:#ef4444"></div>K线涨</div>
+        <div class="legend-item"><div class="legend-color" style="background:#22c55e"></div>K线跌</div>
+        <div class="legend-item"><div class="legend-color" style="background:linear-gradient(90deg,#ef4444 0%,#f97316 25%,#eab308 50%,#84cc16 75%,#22c55e 100%)"></div>健康度</div>
+        <div class="legend-item"><div class="legend-color" style="background:#3b82f6"></div>TPC</div>
+        <div class="legend-item"><div class="legend-color" style="background:#f59e0b"></div>Width</div>
+        <div class="legend-item"><div class="legend-color" style="background:#06b6d4"></div>TP3</div>
+        <div class="legend-item"><div class="legend-color" style="background:#10b981"></div>Winner</div>
+    </div>
+            <div style="font-size:0.7rem;color:#64748b;margin-top:6px;">
+                ▲ 红色=用户买入 ▼ 绿色=用户卖出<br>
+                ★ 金色=推荐买入 ◆ 蓝色=推荐卖出
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let mainChart = null;
+let backtestData = [];
+
+// 根据分数返回颜色（绿->黄->红）
+function getScoreColor(score) {
+    if (score === null || score === undefined) return '#64748b';
+    if (score >= 10) return '#22c55e';      // 绿
+    if (score >= 7) return '#84cc16';       // 黄绿
+    if (score >= 4) return '#eab308';       // 黄
+    if (score >= 0) return '#f97316';       // 橙
+    return '#ef4444';                        // 红
+}
+
+// 初始化图表
+document.addEventListener('DOMContentLoaded', function() {
+    mainChart = echarts.init(document.getElementById('mainChart'));
+    window.addEventListener('resize', function() {
+        mainChart.resize();
+    });
+
+    // 点击事件
+    mainChart.on('click', function(params) {
+        updateDayDetail(params.dataIndex);
+    });
+
+    // 自动运行
+    runBacktest();
+});
+
+// 更新选中日期详情
+function updateDayDetail(index) {
+    if (!backtestData[index]) return;
+    const d = backtestData[index];
+
+    let scoreClass = 'score-terrible';
+    if (d.score >= 10) scoreClass = 'score-excellent';
+    else if (d.score >= 7) scoreClass = 'score-good';
+    else if (d.score >= 4) scoreClass = 'score-normal';
+    else if (d.score >= 0) scoreClass = 'score-bad';
+
+    let futureHtml = '';
+    if (d.future_return !== null) {
+        const color = d.future_return >= 0 ? 'text-green' : 'text-red';
+        futureHtml = `<div class="info-row"><span>未来10日收益</span><span class="${color}">${d.future_return > 0 ? '+' : ''}${d.future_return}%</span></div>`;
+    }
+
+    let tradesHtml = '';
+    if (d.trades && d.trades.length > 0) {
+        tradesHtml = `<div class="info-row"><span>交易</span><span>${d.trades.map(t => `<span class="trade-tag trade-${t.action}">${t.action === 'buy' ? '买' : '卖'} ${t.price}</span>`).join('')}</span></div>`;
+    }
+
+    // 推荐信号
+    let signalHtml = '';
+    if (d.score >= 10) {
+        signalHtml = `<div class="info-row"><span>系统信号</span><span class="signal-buy">★ 强烈推荐买入</span></div>`;
+    } else if (d.score >= 7) {
+        signalHtml = `<div class="info-row"><span>系统信号</span><span class="signal-buy">☆ 推荐买入/加仓</span></div>`;
+    } else if (d.score <= 0) {
+        signalHtml = `<div class="info-row"><span>系统信号</span><span class="signal-sell">◆ 考虑卖出</span></div>`;
+    }
+
+    document.getElementById('dayDetail').innerHTML = `
+        <div class="info-row"><span>日期</span><span style="font-weight:600">${d.date}</span></div>
+        <div class="info-row"><span>开盘</span><span>${d.open}</span></div>
+        <div class="info-row"><span>收盘</span><span style="font-weight:600;color:${d.close >= d.open ? '#ef4444' : '#22c55e'}">${d.close}</span></div>
+        <div class="info-row"><span>最高</span><span>${d.high}</span></div>
+        <div class="info-row"><span>最低</span><span>${d.low}</span></div>
+        <div class="info-row"><span>成交量</span><span>${(d.vol/10000).toFixed(2)}万</span></div>
+        <hr style="border-color:var(--border);margin:8px 0;">
+        ${signalHtml}
+        <div class="info-row"><span>健康度</span><span class="${scoreClass}">${d.score !== null ? d.score + '分' : 'N/A'} ${d.status || ''}</span></div>
+        ${futureHtml}
+        <hr style="border-color:var(--border);margin:8px 0;">
+        <div class="info-row"><span>P1</span><span>${d.p1 || '-'}</span></div>
+        <div class="info-row"><span>P2</span><span>${d.p2 || '-'}</span></div>
+        <div class="info-row"><span>P3</span><span>${d.p3 || '-'}</span></div>
+        <div class="info-row"><span>TPC</span><span>${d.tpc || '-'}%</span></div>
+        <div class="info-row"><span>宽度</span><span>${d.width || '-'}%</span></div>
+        <div class="info-row"><span>偏离</span><span>${d.dist || '-'}%</span></div>
+        <div class="info-row"><span>TP3</span><span>${d.tp3 || '-'}%</span></div>
+        <div class="info-row"><span>获利盘</span><span>${d.winner || '-'}%</span></div>
+        ${tradesHtml}
+    `;
+}
+
+// 运行回测
+document.getElementById('runBtn').addEventListener('click', runBacktest);
+
+async function runBacktest() {
+    const code = document.getElementById('codeInput').value;
+    const start = document.getElementById('startInput').value;
+    const end = document.getElementById('endInput').value;
+
+    document.getElementById('runBtn').disabled = true;
+    document.getElementById('runBtn').innerHTML = '<span class="spinner-border spinner-border-sm"></span> 运行中...';
+
+    try {
+        const response = await fetch(`/api/chip_backtest/${code}?start_date=${start}&end_date=${end}`);
+        const data = await response.json();
+
+        if (data.error) {
+            alert(data.error);
+            return;
+        }
+
+        backtestData = data.daily_results || [];
+        document.getElementById('chartSubtitle').textContent = `${data.name || code} ${code}`;
+
+        // 更新统计
+        document.getElementById('statDays').textContent = data.total_days;
+        document.getElementById('statGood').textContent = data.statistics.good_signals.count;
+        document.getElementById('statAvg').textContent = data.statistics.avg_score;
+        document.getElementById('summaryStats').style.display = 'block';
+
+        renderMainChart();
+        renderTradeList(data.trade_analysis || []);
+
+    } catch (err) {
+        console.error(err);
+        alert('回测失败: ' + err.message);
+    } finally {
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('runBtn').innerHTML = '▶️ 运行回测';
+    }
+}
+
+// 构建健康度折线分段系列（逐段着色，实现红到绿渐变）
+function buildScoreLineSeries(scoreData) {
+    const series = [];
+
+    // 收集所有非null的连续段
+    const segments = [];
+    let seg = [];
+    for (let i = 0; i < scoreData.length; i++) {
+        if (scoreData[i] !== null) {
+            seg.push({ idx: i, val: scoreData[i] });
+        } else {
+            if (seg.length > 0) { segments.push(seg); seg = []; }
+        }
+    }
+    if (seg.length > 0) segments.push(seg);
+
+    // 每个连续段中，逐段绘制（两点一段），按平均分着色
+    segments.forEach(seg => {
+        for (let i = 0; i < seg.length - 1; i++) {
+            const a = seg[i], b = seg[i + 1];
+            const avg = (a.val + b.val) / 2;
+            const color = getScoreColor(avg);
+
+            // 构造数据：只有两个端点有值，其余null
+            const lineData = new Array(scoreData.length).fill(null);
+            lineData[a.idx] = a.val;
+            lineData[b.idx] = b.val;
+
+            series.push({
+                type: 'line',
+                xAxisIndex: 0,
+                yAxisIndex: 1,
+                data: lineData,
+                symbol: 'none',
+                lineStyle: { width: 2.5, color: color },
+                silent: true
+            });
+        }
+    });
+
+    // 符号点系列（圆点按分数着色）
+    series.push({
+        name: '健康度',
+        type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 1,
+        data: scoreData,
+        symbol: 'circle',
+        symbolSize: 5,
+        lineStyle: { width: 0 },
+        itemStyle: {
+            color: function(params) { return getScoreColor(params.value); }
+        }
+    });
+
+    return series;
+}
+
+// 渲染主图表（单图多Grid：上方K线+健康度，下方指标）
+function renderMainChart() {
+    const dates = backtestData.map(d => d.date);
+    const klineData = backtestData.map(d => [d.open, d.close, d.low, d.high]);
+
+    // 健康度折线数据
+    const scoreData = backtestData.map(d => d.score !== null ? d.score : null);
+
+    // 用户交易标记点
+    const userTradeMarks = [];
+    // 系统推荐标记点
+    const sysBuyMarks = [];
+    const sysSellMarks = [];
+
+    backtestData.forEach((d, i) => {
+        // 用户交易
+        if (d.trades && d.trades.length > 0) {
+            d.trades.forEach(t => {
+                userTradeMarks.push({
+                    name: t.action === 'buy' ? '用户买入' : '用户卖出',
+                    coord: [i, t.price],
+                    value: t.price,
+                    itemStyle: {
+                        color: t.action === 'buy' ? '#dc2626' : '#16a34a'
+                    },
+                    symbol: t.action === 'buy' ? 'triangle' : 'triangle',
+                    symbolRotate: t.action === 'buy' ? 0 : 180,
+                    symbolSize: 14,
+                    label: {
+                        show: true,
+                        position: t.action === 'buy' ? 'bottom' : 'top',
+                        formatter: t.action === 'buy' ? '▲' : '▼',
+                        fontSize: 12,
+                        color: t.action === 'buy' ? '#dc2626' : '#16a34a'
+                    }
+                });
+            });
+        }
+
+        // 系统推荐买入点 (score >= 10 强烈推荐, >=7 推荐)
+        if (d.score !== null) {
+            if (d.score >= 10) {
+                sysBuyMarks.push({
+                    name: '强烈推荐买入',
+                    coord: [i, d.low],
+                    value: d.low,
+                    itemStyle: { color: '#fbbf24' },
+                    symbol: 'star',
+                    symbolSize: 16,
+                    label: { show: true, position: 'bottom', formatter: '★', fontSize: 14, color: '#fbbf24' }
+                });
+            } else if (d.score >= 7) {
+                sysBuyMarks.push({
+                    name: '推荐买入',
+                    coord: [i, d.low],
+                    value: d.low,
+                    itemStyle: { color: '#fbbf24' },
+                    symbol: 'star',
+                    symbolSize: 10,
+                    label: { show: true, position: 'bottom', formatter: '☆', fontSize: 10, color: '#fbbf24' }
+                });
+            } else if (d.score <= 0) {
+                sysSellMarks.push({
+                    name: '考虑卖出',
+                    coord: [i, d.high],
+                    value: d.high,
+                    itemStyle: { color: '#60a5fa' },
+                    symbol: 'diamond',
+                    symbolSize: 10,
+                    label: { show: true, position: 'top', formatter: '◆', fontSize: 10, color: '#60a5fa' }
+                });
+            }
+        }
+    });
+
+    const option = {
+        backgroundColor: '#0a0e1a',
+        animation: false,
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'cross',
+                label: { backgroundColor: '#1e293b' }
+            },
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            borderColor: '#334155',
+            textStyle: { color: '#e2e8f0' },
+            formatter: function(params) {
+                const kline = params.find(p => p.seriesName === 'K线');
+                const score = params.find(p => p.seriesName === '健康度');
+                if (!kline) return '';
+
+                const d = backtestData[kline.dataIndex];
+                const up = kline.data[1] >= kline.data[0];
+
+                let tradeInfo = '';
+                if (d.trades && d.trades.length > 0) {
+                    tradeInfo = '<div style="margin-top:4px;border-top:1px solid #334155;padding-top:4px;">' +
+                        d.trades.map(t => `<span style="color:${t.action === 'buy' ? '#dc2626' : '#16a34a'}">${t.action === 'buy' ? '▲买入' : '▼卖出'} ${t.price}元</span>`).join('<br>') +
+                        '</div>';
+                }
+
+                let signalInfo = '';
+                if (d.score >= 10) {
+                    signalInfo = '<div style="color:#fbbf24;font-weight:600;">★ 强烈推荐买入</div>';
+                } else if (d.score >= 7) {
+                    signalInfo = '<div style="color:#fbbf24;">☆ 推荐买入/加仓</div>';
+                } else if (d.score <= 0) {
+                    signalInfo = '<div style="color:#60a5fa;">◆ 考虑卖出</div>';
+                }
+
+                return `
+                    <div style="font-weight:600;margin-bottom:4px;">${d.date}</div>
+                    <div>开: ${kline.data[0]} 收: <span style="color:${up ? '#ef4444' : '#22c55e'}">${kline.data[1]}</span></div>
+                    <div>高: ${kline.data[3]} 低: ${kline.data[2]}</div>
+                    <div>健康度: <span style="color:${getScoreColor(d.score)}">${d.score !== null ? d.score + '分' : 'N/A'}</span> ${d.status || ''}</div>
+                    ${d.future_return !== null ? `<div>未来10日: <span style="color:${d.future_return >= 0 ? '#22c55e' : '#ef4444'}">${d.future_return > 0 ? '+' : ''}${d.future_return}%</span></div>` : ''}
+                    ${signalInfo}
+                    ${tradeInfo}
+                `;
+            }
+        },
+        axisPointer: {
+            link: [{ xAxisIndex: 'all' }],
+            label: { backgroundColor: '#1e293b', color: '#e2e8f0' }
+        },
+        grid: [
+            // 上方：K线图区域 (占70%)
+            {
+                left: '3%', right: '12%', top: '8%', height: '58%',
+                containLabel: false
+            },
+            // 下方：指标区域 (占20%)
+            {
+                left: '3%', right: '12%', top: '70%', height: '16%',
+                containLabel: false
+            }
+        ],
+        xAxis: [
+            // 上方X轴（不显示label，与下方对齐）
+            {
+                type: 'category',
+                data: dates,
+                gridIndex: 0,
+                axisLine: { lineStyle: { color: '#334155' } },
+                axisLabel: { show: false },
+                axisTick: { show: false }
+            },
+            // 下方X轴（显示日期）
+            {
+                type: 'category',
+                data: dates,
+                gridIndex: 1,
+                axisLine: { lineStyle: { color: '#334155' } },
+                axisLabel: { color: '#64748b', fontSize: 10 },
+                axisPointer: {
+                    label: { backgroundColor: '#1e293b', color: '#e2e8f0' }
+                }
+            }
+        ],
+        yAxis: [
+            // 上方左侧：价格
+            {
+                type: 'value',
+                scale: true,
+                gridIndex: 0,
+                position: 'left',
+                axisLine: { lineStyle: { color: '#334155' } },
+                splitLine: { lineStyle: { color: '#1e293b' } },
+                axisLabel: { color: '#64748b' }
+            },
+            // 上方右侧：健康度评分（缩小范围，让K线更大）
+            {
+                type: 'value',
+                scale: true,
+                gridIndex: 0,
+                position: 'right',
+                min: -5,
+                max: 12,
+                axisLine: { lineStyle: { color: '#334155' } },
+                splitLine: { show: false },
+                axisLabel: { color: '#64748b', formatter: '{value}分' },
+                axisPointer: { show: true }
+            },
+            // 下方左侧：指标值
+            {
+                type: 'value',
+                gridIndex: 1,
+                position: 'left',
+                axisLine: { lineStyle: { color: '#334155' } },
+                splitLine: { lineStyle: { color: '#1e293b' } },
+                axisLabel: { color: '#64748b' }
+            }
+        ],
+        dataZoom: [
+            {
+                type: 'inside',
+                xAxisIndex: [0, 1],
+                start: 0,
+                end: 100
+            },
+            {
+                type: 'slider',
+                xAxisIndex: [0, 1],
+                start: 0,
+                end: 100,
+                bottom: 10,
+                height: 20,
+                borderColor: '#334155',
+                fillerColor: 'rgba(59, 130, 246, 0.2)',
+                handleStyle: { color: '#3b82f6' },
+                textStyle: { color: '#64748b' }
+            }
+        ],
+        series: [
+            // 0. K线（上方grid）
+            {
+                name: 'K线',
+                type: 'candlestick',
+                xAxisIndex: 0,
+                yAxisIndex: 0,
+                data: klineData,
+                itemStyle: {
+                    color: '#ef4444',
+                    color0: '#22c55e',
+                    borderColor: '#ef4444',
+                    borderColor0: '#22c55e'
+                },
+                markPoint: {
+                    data: [
+                        ...userTradeMarks,
+                        ...sysBuyMarks,
+                        ...sysSellMarks
+                    ],
+                    symbolOffset: [0, 0]
+                }
+            },
+            // 1. 健康度折线（上方grid，右侧Y轴，红到绿渐变）
+            // 使用分段绘制实现线段颜色随分数变化
+            ...buildScoreLineSeries(scoreData),
+            // 2. TPC（下方grid）
+            {
+                name: 'TPC',
+                type: 'line',
+                xAxisIndex: 1,
+                yAxisIndex: 2,
+                data: backtestData.map(d => d.tpc),
+                smooth: true,
+                symbol: 'none',
+                lineStyle: { width: 1.5, color: '#3b82f6' }
+            },
+            // 3. Width（下方grid）
+            {
+                name: 'Width',
+                type: 'line',
+                xAxisIndex: 1,
+                yAxisIndex: 2,
+                data: backtestData.map(d => d.width),
+                smooth: true,
+                symbol: 'none',
+                lineStyle: { width: 1.5, color: '#f59e0b' }
+            },
+            // 4. TP3（下方grid）
+            {
+                name: 'TP3',
+                type: 'line',
+                xAxisIndex: 1,
+                yAxisIndex: 2,
+                data: backtestData.map(d => d.tp3),
+                smooth: true,
+                symbol: 'none',
+                lineStyle: { width: 1.5, color: '#06b6d4' }
+            },
+            // 5. Winner（下方grid）
+            {
+                name: 'Winner',
+                type: 'line',
+                xAxisIndex: 1,
+                yAxisIndex: 2,
+                data: backtestData.map(d => d.winner),
+                smooth: true,
+                symbol: 'none',
+                lineStyle: { width: 1.5, color: '#10b981' }
+            }
+        ]
+    };
+
+    mainChart.setOption(option, true);
+}
+
+// 渲染交易列表
+function renderTradeList(trades) {
+    const container = document.getElementById('tradeList');
+    if (!trades || trades.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">暂无交易</p>';
+        return;
+    }
+
+    container.innerHTML = trades.map(t => {
+        const badgeClass = t.action === 'buy' ? 'trade-buy' : 'trade-sell';
+        const actionText = t.action === 'buy' ? '买入' : '卖出';
+        let evalHtml = '';
+        if (t.evaluation) {
+            const color = t.evaluation.includes('✅') || t.evaluation.includes('⭐') ? '#22c55e' :
+                         t.evaluation.includes('❌') ? '#ef4444' : '#eab308';
+            evalHtml = `<div style="font-size:0.75rem;color:${color};margin-top:2px;">${t.evaluation}</div>`;
+        }
+        return `
+            <div style="padding:8px 0;border-bottom:1px solid var(--border);">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span style="font-size:0.85rem;">${t.date}</span>
+                    <span class="trade-tag ${badgeClass}">${actionText}</span>
+                </div>
+                <div class="d-flex justify-content-between" style="font-size:0.8rem;color:var(--muted);">
+                    <span>价格: ${t.price}元</span>
+                    ${t.score !== undefined ? `<span>健康度: ${t.score}分</span>` : ''}
+                </div>
+                ${t.future_return !== undefined ? `<div style="font-size:0.8rem;color:${t.future_return >= 0 ? '#22c55e' : '#ef4444'}">未来10日: ${t.future_return > 0 ? '+' : ''}${t.future_return}%</div>` : ''}
+                ${evalHtml}
+            </div>
+        `;
+    }).join('');
+}
+</script>
+{% endblock %}
