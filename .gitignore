@@ -38,3 +38,17 @@ logs/
 # 临时输出
 tmp/
 output/
+
+# 进化引擎本地缓存 + 诊断脚本
+.evo_cache/
+_tmp_*.py
+_diag_*.py
+_check_*.py
+_verify_*.py
+_evo_run_*.log
+
+# 三策略对比临时数据
+data/three_way_comparison_*
+
+# 进化过程快照（只保留最终结果）
+evolution_snapshot_gen*.json
