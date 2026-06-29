@@ -348,6 +348,108 @@ def compute_chip_metrics(day_chip: pd.DataFrame, close: float) -> Optional[Dict]
 
 
 # ═══════════════════════════════════════════════════════
+# 1.5 chip_score_v2 实战校准版评分 (2026-06-29 反向拟合)
+# ═══════════════════════════════════════════════════════
+
+# v2 权重 (基于 1337 笔真实交易 SLSQP 优化 + 5-fold CV 验证)
+# 详见 HANDOVER.md "P3 实战校准" 章节
+V2_WEIGHTS = {
+    'winner':                       0.27,   # 获利盘比例 (主力已赚钱时买入更好)
+    'score':                        0.28,   # 原 chip_score (稀释到 1/4 权重)
+    'resistance_distance_pct':      0.18,   # 距阻力位% (越远 = 上涨空间越大)
+    'peaks_below_close':            0.17,   # 下方支撑峰数 (≥2 = 安全垫厚)
+    'peak_entropy_inverse':         0.07,   # 峰位熵反向 (低 = 主力成本清晰)
+    'top10':                        0.03,   # 前10价格集中度
+}
+
+
+def _norm_pct(v, vmin, vmax):
+    """把值归一化到 0~100，clip 到 [vmin, vmax]"""
+    if v is None or vmax == vmin:
+        return 50.0
+    try:
+        fv = float(v)
+    except (TypeError, ValueError):
+        return 50.0
+    if fv < vmin: fv = vmin
+    if fv > vmax: fv = vmax
+    return (fv - vmin) / (vmax - vmin) * 100
+
+
+def chip_score_v2(metrics: Dict) -> float:
+    """
+    基于 1337 笔真实交易反向校准的 v2 评分（0~100）
+
+    对比 v1 (`analyze_chip_health` 算的 -4~9 离散 score)：
+      v1 在实战中胜率仅 45.7% (Top 30%)
+      v2 在实战中胜率 49.0% (Top 30%)  +3.3pp
+      v2 测试集 P&L +1.93pp  vs 基线
+
+    6 维加权:
+      0.27·winner      (0~1)       — 主力获利盘
+      0.28·score       (-4~9)      — 原 score 保留
+      0.18·resistance  (-30~30%)   — 距阻力位%
+      0.17·peaks_below (0~6)       — 下方支撑峰数
+      0.07·(1-peak_entropy)  (0~4) — 峰位熵反向
+      0.03·top10       (0~100%)    — 前10价格集中度
+
+    Args:
+        metrics: compute_chip_metrics() 或 compute_all_chip_metrics() 返回的 dict
+                 (支持 key 别名: winner/Winner, score/status, etc.)
+
+    Returns:
+        float: 0~100 评分（建议 ≥60 才买入，≥75 强买）
+    """
+    if not metrics or not isinstance(metrics, dict):
+        return 0.0
+
+    def g(*keys, default=None):
+        """按优先级查 key"""
+        for k in keys:
+            v = metrics.get(k)
+            if v is not None:
+                return v
+        return default
+
+    # 1) winner (0~1) — 高越好
+    w = _norm_pct(g('winner', 'Winner', 'winner_ratio', default=0), 0.0, 1.0)
+    # 2) 原 score (-4~9) — 归一到 0~100
+    s_raw = g('score', default=0)
+    try:
+        s = (float(s_raw) + 4) / 13 * 100 if s_raw is not None else 50.0
+    except (TypeError, ValueError):
+        s = 50.0
+    s = max(0.0, min(100.0, s))
+    # 3) 距阻力位% (-30~30) — 高越好（远 = 上涨空间大）
+    r = _norm_pct(g('resistance_distance_pct', 'resistance_dist', default=0), -30.0, 30.0)
+    # 4) 下方支撑峰数 (0~6) — 越多越好
+    pb_raw = g('peaks_below_close', 'peaks_below', default=0)
+    try:
+        pb_v = min(100.0, float(pb_raw) * 25)  # 0→0, 1→25, 2→50, 3→75, 4+→100
+    except (TypeError, ValueError):
+        pb_v = 0.0
+    # 5) 峰位熵反向 (0~4) — 低 = 主力成本清晰 → 加分
+    pe_raw = g('peak_entropy', default=0)
+    try:
+        pe_inv = 100 - _norm_pct(float(pe_raw), 0.0, 4.0)
+    except (TypeError, ValueError):
+        pe_inv = 50.0
+    # 6) top10 (0~100%) — 集中度
+    t10 = _norm_pct(g('top10', 'Top10', default=0), 0.0, 100.0)
+
+    # 各维度已归一化到 0~100，weights 之和=1，直接加权即得 0~100 总分
+    score = (
+        V2_WEIGHTS['winner']                       * w
+        + V2_WEIGHTS['score']                      * s
+        + V2_WEIGHTS['resistance_distance_pct']    * r
+        + V2_WEIGHTS['peaks_below_close']          * pb_v
+        + V2_WEIGHTS['peak_entropy_inverse']       * pe_inv
+        + V2_WEIGHTS['top10']                      * t10
+    )
+    return round(max(0.0, min(100.0, score)), 1)
+
+
+# ═══════════════════════════════════════════════════════
 # 2. 健康度评分体系
 # ═══════════════════════════════════════════════════════
 

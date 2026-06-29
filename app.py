@@ -628,6 +628,28 @@ def _render_dim_cards_html(d):
     tpc = latest.get("tpc", 0)
     p1_pct = latest.get("p1_pct", 0)
     winner = latest.get("winner", 0)
+
+    # ★ P3: v2 实战校准评分 (基于 1337 笔真实交易反向拟合)
+    v2_score = 0.0
+    v2_grade = "—"
+    v2_color = "text-muted"
+    try:
+        from chip_indicators import chip_score_v2
+        # chip_score_v2 期望 metrics 字典, 这里 latest 本身就是一行 metrics
+        v2_score = chip_score_v2(dict(latest))
+    except Exception:
+        v2_score = 0.0
+    if v2_score >= 75:
+        v2_grade, v2_color = "强买 (强吸筹+多支撑+主力已赚)", "text-green"
+    elif v2_score >= 60:
+        v2_grade, v2_color = "可买 (吸筹+支撑合格)", "text-green"
+    elif v2_score >= 50:
+        v2_grade, v2_color = "观望 (中性信号)", "text-yellow"
+    elif v2_score >= 35:
+        v2_grade, v2_color = "回避 (筹码结构转弱)", "text-red"
+    else:
+        v2_grade, v2_color = "强卖 (派发+无支撑+主峰发散)", "text-red"
+
     chip_lines = [
         f'<tr><td class="t-name">P1 主峰位<span class="t-abbr">p1</span></td><td class="t-val">{latest.get("p1","—")} 元</td><td class="t-mean">筹码最集中价位</td></tr>',
         f'<tr><td class="t-name">P1 主峰占比<span class="t-abbr">p1_pct</span></td><td class="t-val">{p1_pct:.2f}%</td><td class="t-mean">≥12% 强势控盘</td></tr>',
@@ -638,6 +660,10 @@ def _render_dim_cards_html(d):
         f'<tr><td class="t-name">偏度<span class="t-abbr">skewness</span></td><td class="t-val">{latest.get("skewness","—")}</td><td class="t-mean">&gt;0右偏, &lt;0左偏</td></tr>',
         f'<tr><td class="t-name">熵<span class="t-abbr">entropy</span></td><td class="t-val">{latest.get("entropy","—")}</td><td class="t-mean">越小越有序集中</td></tr>',
         f'<tr><td class="t-name">形态<span class="t-abbr">morphology</span></td><td class="t-val">{latest.get("morphology","—")}</td><td class="t-mean">单峰/双峰/多峰发散</td></tr>',
+        # ★ P3 v2 实战评分 (高亮, 放在最后一行作为综合判定)
+        f'<tr class="t-v2-row"><td class="t-name"><b>🧬 v2 实战评分</b><span class="t-abbr">v2</span></td>'
+        f'<td class="t-val {v2_color}"><b>{v2_score:.1f} / 100</b></td>'
+        f'<td class="t-mean">{v2_grade}</td></tr>',
     ]
     if tpc >= 25 and p1_pct >= 12:
         chip_concl = f"<b class='text-green'>筹码高度集中</b>, 主力建仓完毕, P1占比 {p1_pct:.1f}% 健康。"
@@ -645,6 +671,11 @@ def _render_dim_cards_html(d):
         chip_concl = f"<b class='text-yellow'>筹码中等集中</b> (TPC {tpc:.1f}%), 主力仍在收集阶段。"
     else:
         chip_concl = f"<b class='text-red'>筹码分散</b> (TPC {tpc:.1f}%), 缺乏主力介入。"
+    # ★ P3: 结论里追加 v2 综合判定
+    chip_concl += (
+        f' <span class="{v2_color}"><b>🧬 v2 评分 {v2_score:.1f}/100</b> · {v2_grade}</span>'
+        f' <span class="text-muted">(基于 1337 笔真实交易校准)</span>'
+    )
     chip_html = f'''<div class="dim-card-header"><span class="dim-icon">🔬</span><span class="dim-title">筹码结构</span><span class="dim-sub">{latest.get("morphology","—")}</span></div>
     <div class="dim-card-body"><table class="mini-tbl"><thead><tr><th>指标</th><th>数值</th><th>含义</th></tr></thead><tbody>{"".join(chip_lines)}</tbody></table></div>
     <div class="dim-subsection"><div class="dim-subtitle">📝 结论</div><div class="dim-conclusion">{chip_concl}</div></div>'''

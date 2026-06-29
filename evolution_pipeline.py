@@ -28,7 +28,8 @@ except ModuleNotFoundError:
 
 from holding_manager import HoldingManager
 from chip_data_fetcher import fetch_complete_data
-from chip_indicators import compute_all_chip_metrics
+from chip_indicators import compute_all_chip_metrics, chip_score_v2, compute_chip_metrics, analyze_chip_health
+from engine.daily_review_engine import classify_future, health_label_from_chip_score
 from kronos_integration import KronosChipFuser
 
 # ============================================================
@@ -300,6 +301,278 @@ def run_batch(params: Dict, start: str, end: str, pool=None,
         r = run_one_attributed(ts_code, name, params, start, end, chip_weight, kronos_weight)
         results.append(r)
     return results
+
+
+# ============================================================
+# ★ P2-1 新增: Layer 0 信号级多窗口前置筛选
+# ============================================================
+# 设计思路（复用 DailyReviewEngine 的多窗口后验方法论）:
+#   对给定参数组合，先不跑完整的交易回测（慢，1~2s/股），
+#   而是在信号触发日（chip_score + Kronos 融合 score ≥ entry_score）做
+#   三窗口后验统计（快，毫秒级/股）。
+#   → 多窗口综合胜率 ≥ 阈值，才进入 Layer 1 的完整交易回测。
+#
+# ★ P3 实战校准: 后验窗口从 T+5/T+10/T+20 → T+3/T+7/T+14
+#   理由: 1337 笔真实交易回测显示
+#     - 用户 53% 持仓 < 3 天 (T+1/T+2)
+#     - 7-14 天波段胜率最高 (58.8% vs 41.6% 超短)
+#   把评估窗口对齐实盘节奏，能更准确反映信号在不同持仓周期下的有效性。
+# ============================================================
+# 后验窗口 (可被 params 覆盖)
+LAYER0_WINDOWS = (3, 7, 14)
+
+
+def _signal_level_eval_one(ts_code: str, name: str, start: str, end: str,
+                           params: Dict) -> Dict:
+    """
+    单股信号级评估 (多窗口后验投票，不执行实际交易)
+    Returns: { rise_cnt, fall_cnt, shake_cnt, total,
+               t3_hit, t7_hit, t14_hit, combined_score, avg_future_ret }
+    """
+    import pickle as _pk
+    # 1) 取缓存数据
+    full_data = None
+    for (s, e) in [(TRAIN_START, TRAIN_END), (VAL_START, VAL_END), (start, end)]:
+        fp = _cache_path(ts_code, s, e)
+        if os.path.isfile(fp) and os.path.getsize(fp) > 1024:
+            try:
+                with open(fp, 'rb') as f:
+                    seg = _pk.load(f)
+                if full_data is None:
+                    full_data = seg
+                else:
+                    for key in ('kline', 'chip_data', 'indicators'):
+                        a = full_data.get(key)
+                        b = seg.get(key)
+                        if isinstance(a, pd.DataFrame) and isinstance(b, pd.DataFrame):
+                            full_data[key] = pd.concat([a, b]).drop_duplicates()
+            except Exception:
+                pass
+    if full_data is None:
+        return {"error": "no_cache", "combined_score": -1.0, "total": 0}
+
+    kline = full_data.get('kline', pd.DataFrame())
+    chip_data = full_data.get('chip_data', pd.DataFrame())
+    if kline.empty or chip_data.empty or 'close' not in kline.columns:
+        return {"error": "no_kline/chip", "combined_score": -1.0, "total": 0}
+
+    # 归一化日期
+    for df in (kline, chip_data):
+        if df is None:
+            continue
+        for col in ('trade_date', 'date', 'vtrade_date'):
+            if col in df.columns:
+                df['_dn'] = df[col].astype(str).str.replace('-', '').str.strip()
+                break
+        if '_dn' not in df.columns:
+            df['_dn'] = ''
+    kline_sorted = kline.sort_values('_dn').reset_index(drop=True)
+    close_sr = pd.to_numeric(kline_sorted['close'], errors='coerce').fillna(0)
+
+    # 2) 逐日计算 chip_score + 判断是否"信号触发"
+    entry_threshold = float(params.get('entry_score', DEFAULT_PARAMS['entry_score']))
+    stop_loss_ratio = float(params.get('stop_loss', DEFAULT_PARAMS['stop_loss']))
+
+    metrics_history = {}   # date → metrics dict
+    triggers = []          # (idx, date, chip_score, avg_cost_for_stop)
+
+    n = len(kline_sorted)
+    for i in range(n):
+        d = kline_sorted['_dn'].iloc[i]
+        if not d:
+            continue
+        if d < start or d > end:
+            continue
+        c = float(close_sr.iloc[i]) if close_sr.iloc[i] else 0
+        if c <= 0:
+            continue
+        chip_day = None
+        if 'trade_date' in chip_data.columns:
+            mask = chip_data['_dn'] == d
+            chip_day = chip_data[mask]
+        elif '_dn' in chip_data.columns:
+            chip_day = chip_data[chip_data['_dn'] == d]
+        else:
+            chip_day = chip_data.head(0)
+        if chip_day is None or len(chip_day) < 3:
+            continue
+        m = compute_chip_metrics(chip_day, close=c)
+        if m is None:
+            continue
+        metrics_history[d] = m
+        # 计算 chip_score (需要 7 天前的指标)
+        dates_sorted = sorted(metrics_history.keys())
+        pos = dates_sorted.index(d) if d in dates_sorted else -1
+        score = None
+        if pos >= 7:
+            prev_d = dates_sorted[pos - 7]
+            try:
+                score = int(analyze_chip_health(m, metrics_history[prev_d]).get('score', 0))
+            except Exception:
+                score = None
+        if score is None:
+            continue
+        # ★ P3 #2: winner 硬过滤 (主力亏本被套 < 30% 直接淘汰)
+        #   1337 笔回测: winner<30% 胜率仅 ~35%, 远低于 winner>=50% 的 52%
+        winner = float(m.get('winner', 0) or 0)
+        if winner < 0.30:
+            continue
+        # ★ P3 #1: v2 score 过滤 (v2 < 50 直接淘汰)
+        #   v2 = 0.27·winner + 0.28·score + 0.18·resistance + 0.17·peaks_below + ...
+        #   50 是中性值；<50 表示综合"该卖"信号
+        #   注: m 不含 score 键，需注入否则 v2 的 28% 权重维度永远 fallback=0
+        m['score'] = score
+        try:
+            v2_score = chip_score_v2(m)
+        except Exception:
+            v2_score = 50.0
+        if v2_score < 50.0:
+            continue
+        # 是否触发 entry 信号？这里简化：chip_score >= entry_threshold (不考虑 Kronos 权重，纯信号级)
+        if score >= entry_threshold:
+            triggers.append((i, d, score, c, v2_score))
+
+    if not triggers:
+        return {"ts_code": ts_code, "name": name, "combined_score": 0.0,
+                "total": 0, "no_trigger": True,
+                "t3_hit": 0, "t7_hit": 0, "t14_hit": 0}
+
+    # 3) 对每个触发点做三窗口后验 (P3 校准: T+3 / T+7 / T+14)
+    W_T3, W_T7, W_T14 = LAYER0_WINDOWS
+    t3 = t7 = t14 = {"rise": 0, "fall": 0, "shake": 0}
+    ret_sum = 0.0
+    valid = 0
+    burst_count = 0
+    stopped_early_count = 0
+    for (idx, d, score, entry_price, v2_score) in triggers:
+        # T+3 (超短持仓)
+        r3 = classify_future(close_sr, idx, W_T3)
+        if r3["label"] != "no_data":
+            t3[r3["label"]] = t3.get(r3["label"], 0) + 1
+        # T+7 (中线持仓)
+        r7 = classify_future(close_sr, idx, W_T7)
+        if r7["label"] != "no_data":
+            t7[r7["label"]] = t7.get(r7["label"], 0) + 1
+            ret_sum += float(r7.get("change_pct") or 0.0)
+            valid += 1
+            if r7.get("burst_detected"):
+                burst_count += 1
+            # 简化版止损检查 (T+7 日内最低点跌破 entry*stop_loss 视为被止损)
+            seg_lo = float(close_sr.iloc[idx+1:min(idx+W_T7+1, n)].min()) if idx + 1 < n else entry_price
+            if seg_lo < entry_price * stop_loss_ratio:
+                stopped_early_count += 1
+        # T+14 (波段持仓, 用户回测中胜率最高)
+        r14 = classify_future(close_sr, idx, W_T14)
+        if r14["label"] != "no_data":
+            t14[r14["label"]] = t14.get(r14["label"], 0) + 1
+
+    def _hit(window: Dict):
+        tot = sum(window.values())
+        return window.get("rise", 0) / tot if tot else 0.0
+
+    t3_hit = _hit(t3)
+    t7_hit = _hit(t7)
+    t14_hit = _hit(t14)
+    # 综合得分: T+7 权重 50%, T+3/T+14 各 25%
+    # (T+7 之所以最重, 因为用户实盘 7-14 天波段胜率 58.8%, 是最佳持仓周期)
+    combined_score = 0.25 * t3_hit + 0.50 * t7_hit + 0.25 * t14_hit
+    avg_ret = ret_sum / valid if valid else 0.0
+    # ★ P3 #1+#2: triggers 已被 v2 score + winner 双重过滤
+    #   返回平均 v2 供上层调试
+    avg_v2 = round(sum(t[4] for t in triggers) / len(triggers), 1) if triggers else 0.0
+    return {
+        "ts_code": ts_code, "name": name,
+        "triggers": len(triggers),
+        "total_valid": valid,
+        "avg_future_ret_T7": round(avg_ret, 2),
+        "burst_rate": round(burst_count / max(valid, 1), 3),
+        "stop_loss_hit_rate": round(stopped_early_count / max(valid, 1), 3),
+        "t3": t3, "t7": t7, "t14": t14,
+        "t3_hit_rate": round(t3_hit, 3),
+        "t7_hit_rate": round(t7_hit, 3),
+        "t14_hit_rate": round(t14_hit, 3),
+        "combined_score": round(combined_score, 4),
+        "avg_v2_score": avg_v2,  # ★ P3 调试字段: 反映该股 trigger 时的平均 v2
+        "no_trigger": False,
+    }
+
+
+def layer0_signal_screen(param_grid: Dict, start: str, end: str,
+                         top_k_ratio: float = 0.20,
+                         min_combined_hit: float = 0.45,
+                         pool=None) -> List[Dict]:
+    """
+    ★ P2-1 Layer 0 前置筛选: 先用信号级多窗口淘汰明显无预测力的参数组合
+
+    Args:
+        param_grid:   参数搜索空间 (dict of lists)
+        start, end:   评估区间
+        top_k_ratio:  保留前百分之多少的参数组合 (默认前 20%)
+        min_combined_hit: 三窗口综合命中率最低准入门槛 (默认≥45%, 否则丢弃)
+        pool:         股票池
+
+    Returns:
+        筛选后的参数组合列表，按综合得分降序。每个元素:
+          { 'params': {...}, 'avg_score': 0.65, 'per_stock': [...] }
+    """
+    import itertools as _it
+    pool = pool or STOCKS_POOL
+    keys = list(param_grid.keys())
+    values = [param_grid[k] for k in keys]
+    combos = list(_it.product(*values))
+    total = len(combos)
+    print(f'\n  🧪 Layer0 信号级三窗口筛选：参数组合 {total} 组 × {len(pool)} 股')
+    print(f'     准入卡：三窗口综合命中率≥{min_combined_hit*100:.0f}%，保留前 {top_k_ratio*100:.0f}%')
+
+    scored = []
+    for i, combo in enumerate(combos, 1):
+        params = dict(zip(keys, combo))
+        # 拷贝嵌套 list 型参数（warn_ratio_schedule），避免共享引用
+        for k in keys:
+            if isinstance(param_grid[k][0], list) and not isinstance(params[k], list):
+                pass
+            if isinstance(params[k], list):
+                params[k] = params[k][:]
+        per_stock = []
+        n_trig = 0
+        n_valid = 0
+        sum_sc = 0.0
+        for ts_code, name in pool:
+            ev = _signal_level_eval_one(ts_code, name, start, end, params)
+            per_stock.append(ev)
+            if ev.get("total_valid", 0) > 0:
+                sum_sc += ev.get("combined_score", 0.0) or 0.0
+                n_trig += ev.get("triggers", 0) or 0
+                n_valid += 1
+        avg_sc = sum_sc / n_valid if n_valid else 0.0
+        # 跨股稳定性惩罚：至少 50% 股票有触发信号，否则惩罚
+        stable_bonus = (n_valid / len(pool)) ** 0.5 if pool else 0.0
+        final_sc = round(avg_sc * (0.5 + 0.5 * stable_bonus), 4)
+        scored.append({"params": params, "avg_score": avg_sc,
+                       "stable_adjusted_score": final_sc,
+                       "triggers_per_stock_avg": round(n_trig / max(len(pool), 1), 1),
+                       "valid_stock_ratio": round(n_valid / max(len(pool), 1), 2),
+                       "per_stock_summary": [
+                           {"ts_code": s["ts_code"], "combined_score": s.get("combined_score"),
+                            "triggers": s.get("triggers", 0), "avg_ret_T10": s.get("avg_future_ret_T10")}
+                           for s in per_stock if not s.get("no_trigger") and not s.get("error")
+                       ]})
+        if i % 5 == 0 or i == total:
+            print(f'    [{i}/{total}] 处理中...  最佳={max(s["stable_adjusted_score"] for s in scored):.3f} 当前combo={final_sc:.3f}')
+
+    # 过滤 + 排序
+    filtered = [s for s in scored if s["avg_score"] >= min_combined_hit]
+    if not filtered:
+        print(f'    ⚠️  没有组合达到 {min_combined_hit*100:.0f}%，放宽门槛取前 50%')
+        scored_sorted = sorted(scored, key=lambda x: x["stable_adjusted_score"], reverse=True)
+        filtered = scored_sorted[: max(1, len(scored_sorted) // 2)]
+    else:
+        filtered.sort(key=lambda x: x["stable_adjusted_score"], reverse=True)
+    keep_n = max(1, int(len(filtered) * top_k_ratio))
+    kept = filtered[:keep_n]
+    print(f'    ✅ 信号级筛选完成: {total} → 准入 {len(filtered)} → 保留 Top {keep_n}')
+    print(f'       Top3 综合得分: {[k["stable_adjusted_score"] for k in kept[:3]]}')
+    return kept
 
 
 # ============================================================

@@ -66,6 +66,13 @@
         text-align: right; white-space: nowrap; padding-right: 1rem; }
     .mini-tbl .t-mean { color: var(--muted); font-size: 0.77rem; }
     .mini-tbl .t-mean b { color: var(--text); font-weight: 600; }
+    /* ★ P3 v2 实战评分行 — 高亮 */
+    .mini-tbl tr.t-v2-row {
+        background: linear-gradient(90deg, rgba(34,197,94,0.08), rgba(59,130,246,0.04));
+        border-top: 1px dashed rgba(34,197,94,0.4);
+    }
+    .mini-tbl tr.t-v2-row:hover { background: rgba(34,197,94,0.10) !important; }
+    .mini-tbl tr.t-v2-row .t-val { font-size: 1.05rem; }
 
     /* 卡片内子区域 */
     .dim-subsection { border-top: 1px solid var(--border); padding: 0.5rem 0.7rem 0; }
@@ -463,7 +470,7 @@ function renderMainCard(d) {
         ['P1 近3日', trend3(records,'p1_pct'), '主力筹码短趋势'],
         ['P1 近5日', trend5(records,'p1_pct'), '主力筹码中趋势'],
         ['TPC 近5日', trend5(records,'tpc'), '筹码集中度变化趋势'],
-        ['当前收盘价', fv(latest.close)+' 元', 'vs 成本 '+(latest.weight_avg||0)', 判断盈亏面'],
+        ['当前收盘价', fv(latest.close)+' 元', 'vs 成本 '+(latest.weight_avg||0)+' 元', '判断盈亏面'],
     ];
 
     // 背离信号

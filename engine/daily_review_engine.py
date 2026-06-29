@@ -65,23 +65,144 @@ def classify_health(verdict: dict) -> tuple:
     return classify_health_params(verdict, params=None)
 
 
-# 健康度阈值的默认值 (用 dataclass 集中管理, 便于进化调参)
+# 健康度阈值的默认值 (集中管理, 便于进化调参 + Kronos 联合进化)
 DEFAULT_HEALTH_PARAMS = {
     "dispatch_threshold":       4,    # 派发分数 >= 此值 -> dispatch (顶部信号)
     "lock_for_accumulate":      5,    # 持有+锁仓>=此值 -> accumulate
     "lock_for_accumulate_with_div": 3,  # 持有+锁仓>=此值+强背离>=1 -> accumulate
     "lock_for_watch_accumulate": 4,  # 观望+锁仓>=此值 -> accumulate
     "min_div_strong":            1,    # 配合需要的最少强背离数
+    # ── ★ P1-2 新增: Kronos 升降级阈值 (与 chip_score 联动) ──
+    "kronos_upgrade_conf":    0.80,   # fused_conf>=此值 → 升级一档 (shaking→accumulate 等)
+    "kronos_downgrade_conf":  0.25,   # fused_conf<=此值 → 降级一档
+    "chip_promote_score":     7,      # chip_score>=此值 → 强制升级成 accumulate (实测命中率77.8%)
+    "chip_demote_score":      -2,     # chip_score<=此值 → 强制降级成 dispatch (实测命中率65%)
 }
 
 
-def classify_health_params(verdict: dict, params: dict = None) -> tuple:
+# ══════════════════════════════════════════════════════════════
+# P1-1 chip_score (-4 ~ +9) ↔ 4 档健康度 双向映射
+# ══════════════════════════════════════════════════════════════
+#
+# 设计依据:
+#   chip_indicators.analyze_chip_health 命中基准 (kronos_integration/__init__.py:211-212)
+#     score >= 7  →  bullish →  P(涨|bullish) ≈ 0.778   → 映射 accumulate
+#     4 <= s <=6  →  偏多震荡 →                           → 映射 shaking (偏多)
+#     1 <= s <=3  →  中性震荡 →                           → 映射 shaking (中性)
+#    -1 <= s <=0  →  信号弱   →                           → 映射 unclear
+#     score <=-2  →  bearish →  P(跌|bearish) ≈ 0.65    → 映射 dispatch
+#
+HEALTH_CHIP_SCORE_MAP = [
+    # (health_label, color, icon, chip_lo_inclusive, chip_hi_inclusive)
+    ("dispatch",   "#ef4444", "🔴", -4,  -2),
+    ("unclear",    "#94a3b8", "⚪", -1,   0),
+    ("shaking",    "#eab308", "🟡",  1,   6),
+    ("accumulate", "#22c55e", "🟢",  7,   9),
+]
+# 反向查询: health → (lo, hi) 分数区间
+HEALTH_TO_CHIP_RANGE = {
+    "dispatch":   (-4, -2),
+    "unclear":    (-1,  0),
+    "shaking":    ( 1,  6),
+    "accumulate": ( 7,  9),
+}
+
+
+def health_label_from_chip_score(chip_score: int) -> tuple:
     """
-    参数化健康度分类器 — 用于进化优化阈值
+    P1-1 正向映射: chip_indicators.analyze_chip_health 的连续评分 (-4~9)
+    → classify_health 的 4 档离散标签 (吸筹/震荡/派发/不明朗)
+
+    Args:
+        chip_score: analyze_chip_health(current, prev_7d)['score']
+
+    Returns:
+        (health: str, color: str, icon: str)
+    """
+    if chip_score is None:
+        return ("unclear", "#94a3b8", "⚪")
+    s = int(chip_score)
+    # 防御性截断到 [-4, 9]
+    s = max(-4, min(9, s))
+    for label, color, icon, lo, hi in HEALTH_CHIP_SCORE_MAP:
+        if lo <= s <= hi:
+            return (label, color, icon)
+    return ("unclear", "#94a3b8", "⚪")
+
+
+def chip_score_range_from_health(health_label: str) -> tuple:
+    """
+    P1-1 反向映射: 4 档健康度 → 对应 chip_score 的 [lo, hi] 区间
+    用于可视化在 chip_score 轴上标绘健康度分段。
+
+    Returns:
+        (lo_inclusive, hi_inclusive)
+    """
+    return HEALTH_TO_CHIP_RANGE.get(health_label, (-4, 9))
+
+
+def _apply_kronos_adjustment(base_label: str, base_color: str, base_icon: str,
+                             chip_score: int = None,
+                             kronos_fused_score: float = None,
+                             params: dict = None) -> tuple:
+    """
+    P1-2 Kronos 贝叶斯融合修正: 根据 chip_score 强度 + Kronos 融合置信度
+    进行 1 档升级 / 降级。
+
+    规则 (防御性, 保守调整):
+      1) chip_score 极端值优先 (硬规则):
+         - chip_score >= chip_promote_score (默认7) → 强制 upgrade 至 accumulate
+         - chip_score <= chip_demote_score  (默认-2) → 强制 downgrade 至 dispatch
+      2) Kronos 软规则 (仅当 chip_score 处于边界灰色区域时生效):
+         - fused_conf >= kronos_upgrade_conf   (0.80) → 升 1 档
+         - fused_conf <= kronos_downgrade_conf (0.25) → 降 1 档
+    """
+    p = dict(DEFAULT_HEALTH_PARAMS)
+    if params:
+        p.update(params)
+
+    ORDER = ["dispatch", "unclear", "shaking", "accumulate"]
+    COLORS = {"dispatch": "#ef4444", "unclear": "#94a3b8", "shaking": "#eab308", "accumulate": "#22c55e"}
+    ICONS = {"dispatch": "🔴", "unclear": "⚪", "shaking": "🟡", "accumulate": "🟢"}
+
+    label = base_label
+    if label not in ORDER:
+        label = "unclear"
+    idx = ORDER.index(label)
+
+    # 1) chip_score 硬规则 (强证据, 优先级最高)
+    if chip_score is not None:
+        cs = int(chip_score)
+        if cs >= p.get("chip_promote_score", 7) and idx < ORDER.index("accumulate"):
+            idx = ORDER.index("accumulate")
+        elif cs <= p.get("chip_demote_score", -2) and idx > ORDER.index("dispatch"):
+            idx = ORDER.index("dispatch")
+
+    # 2) Kronos 软规则 (融合置信度加成)
+    if kronos_fused_score is not None:
+        fc = float(kronos_fused_score)
+        if fc >= p.get("kronos_upgrade_conf", 0.80) and idx < len(ORDER) - 1:
+            idx += 1   # 升级一档
+        elif fc <= p.get("kronos_downgrade_conf", 0.25) and idx > 0:
+            idx -= 1   # 降级一档
+
+    final = ORDER[idx]
+    return (final, COLORS[final], ICONS[final])
+
+
+def classify_health_params(verdict: dict, params: dict = None,
+                           chip_score: int = None,
+                           kronos_fused_score: float = None,
+                           kronos_adjust: bool = True) -> tuple:
+    """
+    参数化健康度分类器 — 进化优化阈值 + P1 Kronos 融合增强
 
     Args:
         verdict: compute_verdict() 输出
         params: 阈值参数 (None = 使用 DEFAULT_HEALTH_PARAMS)
+        chip_score: [可选] chip_indicators.analyze_chip_health 的 score (-4~9)
+        kronos_fused_score: [可选] KronosChipFuser.bayesian_fusion()['fused_confidence']
+        kronos_adjust: 是否启用 Kronos + chip_score 修正 (默认True; 关=原行为)
 
     Returns:
         (health, color, emoji)
@@ -97,25 +218,36 @@ def classify_health_params(verdict: dict, params: dict = None) -> tuple:
     dispatch = scores.get("dispatch", 0) or 0
     div_strong = scores.get("divergence_strong", 0) or 0
 
+    # ── 原版 verdict 驱动 (锁仓/派发信号) ──
     # 顶部信号 (danger)
     if action == "清仓" or dispatch >= p["dispatch_threshold"]:
-        return ("dispatch", "#ef4444", "🔴")
+        base = ("dispatch", "#ef4444", "🔴")
     # 减仓信号
-    if action == "减仓":
-        return ("shaking", "#eab308", "🟡")
+    elif action == "减仓":
+        base = ("shaking", "#eab308", "🟡")
     # 持有 + 强锁仓
-    if action == "持有":
+    elif action == "持有":
         if lock >= p["lock_for_accumulate"]:
-            return ("accumulate", "#22c55e", "🟢")
-        if lock >= p["lock_for_accumulate_with_div"] and div_strong >= p["min_div_strong"]:
-            return ("accumulate", "#22c55e", "🟢")
-        return ("shaking", "#eab308", "🟡")
+            base = ("accumulate", "#22c55e", "🟢")
+        elif lock >= p["lock_for_accumulate_with_div"] and div_strong >= p["min_div_strong"]:
+            base = ("accumulate", "#22c55e", "🟢")
+        else:
+            base = ("shaking", "#eab308", "🟡")
     # 观望 + 还不错的锁仓
-    if action == "观望":
+    elif action == "观望":
         if lock >= p["lock_for_watch_accumulate"]:
-            return ("accumulate", "#22c55e", "🟢")
-        return ("unclear", "#94a3b8", "⚪")
-    return ("unclear", "#94a3b8", "⚪")
+            base = ("accumulate", "#22c55e", "🟢")
+        else:
+            base = ("unclear", "#94a3b8", "⚪")
+    else:
+        base = ("unclear", "#94a3b8", "⚪")
+
+    # ── ★ P1-2 新增: Kronos + chip_score 联合修正 ──
+    if kronos_adjust and (chip_score is not None or kronos_fused_score is not None):
+        return _apply_kronos_adjustment(*base, chip_score=chip_score,
+                                        kronos_fused_score=kronos_fused_score,
+                                        params=p)
+    return base
 
 
 HEALTH_LABEL_CN = {
@@ -130,7 +262,10 @@ HEALTH_LABEL_CN = {
 # - 关 dispatch_winner (-11.3% 拖累)
 # - KEEP peaks_below, gap_pct_mid, width_70_tight
 DEFAULT_RAW_HEALTH_PARAMS = {
-    "dispatch_winner_threshold": 90,     # winner >= (高级信号, 默认关)
+    # P3 实战校准: 1337 笔真实回测表明 winner 90% 不是派发信号
+    #   (winner 高的买入后反而胜率 52% > winner 低 42%)
+    # 把阈值从 90 提到 95，避免误判；同时改名为 dispatch_强派发阈值
+    "dispatch_winner_threshold": 95,     # winner >= 95% 才视为派发 (校准后)
     "dispatch_tpc_threshold":    25,     # tpc >=
     "acc_base_tpc":              25,     # 基础: tpc >=
     "acc_base_p1_pct":           12,     # 基础: p1_pct >=
@@ -142,15 +277,21 @@ DEFAULT_RAW_HEALTH_PARAMS = {
 }
 
 
-def classify_health_from_raw(metrics: dict, params: dict = None) -> tuple:
+def classify_health_from_raw(metrics: dict, params: dict = None,
+                             chip_score: int = None,
+                             kronos_fused_score: float = None,
+                             kronos_adjust: bool = True) -> tuple:
     """
     用底层指标直接分类健康度 (不依赖 verdict/lock_passed)
-    规则经 scripts/_backtest_indicators.py A/B 验证: 命中率 68%
+    + P1 Kronos / chip_score 联动修正
 
     Args:
         metrics: 含 tpc, p1_pct, winner, peaks_below_close, width_70,
                  gap_pct, peak_entropy, p1 等指标的 dict (来自 daily_records)
         params:  阈值覆盖 (None 用 DEFAULT_RAW_HEALTH_PARAMS)
+        chip_score: [可选] chip_indicators.analyze_chip_health 的 score
+        kronos_fused_score: [可选] KronosChipFuser.bayesian_fusion 的 fused_conf
+        kronos_adjust: 是否启用修正 (默认True)
 
     Returns:
         (health, reason) where health in {accumulate, dispatch, shaking, unclear}
@@ -171,29 +312,50 @@ def classify_health_from_raw(metrics: dict, params: dict = None) -> tuple:
     width_70 = metrics.get('width_70', 0) or 0
     p1 = metrics.get('p1', 0) or 0
     gap_pct = metrics.get('gap_pct', 0) or 0
+    if chip_score is None:
+        chip_score = metrics.get('chip_score')
 
     # 1) Dispatch (高级信号, 须 winner 异常高)
     if winner >= p['dispatch_winner_threshold'] and tpc >= p['dispatch_tpc_threshold']:
-        return ('dispatch', f'winner>={p["dispatch_winner_threshold"]}+tpc>={p["dispatch_tpc_threshold"]} (顶部)')
+        base_health, base_reason = 'dispatch', f'winner>={p["dispatch_winner_threshold"]}+tpc>={p["dispatch_tpc_threshold"]} (顶部)'
+    else:
+        # 2) Accumulate (满足任一增强条件 + 基础)
+        reasons = []
+        if tpc >= p['acc_base_tpc'] and p1_pct >= p['acc_base_p1_pct']:
+            reasons.append(f'tpc>={p["acc_base_tpc"]}+p1_pct>={p["acc_base_p1_pct"]}')
+        if peaks_below >= p['acc_peaks_below']:
+            reasons.append(f'peaks_below>={p["acc_peaks_below"]} (低位)')
+        if p['acc_gap_pct_min'] <= gap_pct <= p['acc_gap_pct_max']:
+            reasons.append(f'gap_pct∈[{p["acc_gap_pct_min"]}%-{p["acc_gap_pct_max"]}%]')
+        if width_70 > 0 and p1 > 0 and width_70 <= p1 * p['acc_width_70_pct_of_p1'] / 100:
+            reasons.append(f'width_70≤{p["acc_width_70_pct_of_p1"]}%×P1')
+        if reasons:
+            base_health, base_reason = 'accumulate', '+'.join(reasons)
+        elif tpc >= p['shaking_tpc']:
+            # 3) Shaking (弱集中)
+            base_health, base_reason = 'shaking', f'tpc>={p["shaking_tpc"]} (弱集中)'
+        else:
+            base_health, base_reason = 'unclear', '无信号'
 
-    # 2) Accumulate (满足任一增强条件 + 基础)
-    reasons = []
-    if tpc >= p['acc_base_tpc'] and p1_pct >= p['acc_base_p1_pct']:
-        reasons.append(f'tpc>={p["acc_base_tpc"]}+p1_pct>={p["acc_base_p1_pct"]}')
-    if peaks_below >= p['acc_peaks_below']:
-        reasons.append(f'peaks_below>={p["acc_peaks_below"]} (低位)')
-    if p['acc_gap_pct_min'] <= gap_pct <= p['acc_gap_pct_max']:
-        reasons.append(f'gap_pct∈[{p["acc_gap_pct_min"]}%-{p["acc_gap_pct_max"]}%]')
-    if width_70 > 0 and p1 > 0 and width_70 <= p1 * p['acc_width_70_pct_of_p1'] / 100:
-        reasons.append(f'width_70≤{p["acc_width_70_pct_of_p1"]}%×P1')
-    if reasons:
-        return ('accumulate', '+'.join(reasons))
-
-    # 3) Shaking (弱集中)
-    if tpc >= p['shaking_tpc']:
-        return ('shaking', f'tpc>={p["shaking_tpc"]} (弱集中)')
-
-    return ('unclear', '无信号')
+    # ── ★ P1-2 Kronos + chip_score 联合修正 (与 classify_health_params 对齐) ──
+    if kronos_adjust and (chip_score is not None or kronos_fused_score is not None):
+        COLOR_MAP = {"dispatch": "#ef4444", "unclear": "#94a3b8", "shaking": "#eab308", "accumulate": "#22c55e"}
+        ICON_MAP  = {"dispatch": "🔴", "unclear": "⚪", "shaking": "🟡", "accumulate": "🟢"}
+        base_color = COLOR_MAP.get(base_health, "#94a3b8")
+        base_icon  = ICON_MAP.get(base_health, "⚪")
+        final_health, _, _ = _apply_kronos_adjustment(
+            base_health, base_color, base_icon,
+            chip_score=chip_score,
+            kronos_fused_score=kronos_fused_score,
+            # 复用 DEFAULT_HEALTH_PARAMS 中的 Kronos 阈值
+            params={k: DEFAULT_HEALTH_PARAMS[k] for k in DEFAULT_HEALTH_PARAMS
+                    if k in ("chip_promote_score", "chip_demote_score",
+                             "kronos_upgrade_conf", "kronos_downgrade_conf")}
+        )
+        if final_health != base_health:
+            adjust_tag = f"[升→{final_health}]" if final_health in ("accumulate", "shaking") else f"[降→{final_health}]"
+            return (final_health, f"{base_reason} {adjust_tag}")
+    return (base_health, base_reason)
 
 
 def _to_native(obj):
