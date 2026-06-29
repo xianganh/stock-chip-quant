@@ -62,22 +62,57 @@ def classify_health(verdict: dict) -> tuple:
         (health, color, emoji)
         health ∈ {"accumulate", "shaking", "dispatch", "unclear"}
     """
+    return classify_health_params(verdict, params=None)
+
+
+# 健康度阈值的默认值 (用 dataclass 集中管理, 便于进化调参)
+DEFAULT_HEALTH_PARAMS = {
+    "dispatch_threshold":       4,    # 派发分数 >= 此值 -> dispatch (顶部信号)
+    "lock_for_accumulate":      5,    # 持有+锁仓>=此值 -> accumulate
+    "lock_for_accumulate_with_div": 3,  # 持有+锁仓>=此值+强背离>=1 -> accumulate
+    "lock_for_watch_accumulate": 4,  # 观望+锁仓>=此值 -> accumulate
+    "min_div_strong":            1,    # 配合需要的最少强背离数
+}
+
+
+def classify_health_params(verdict: dict, params: dict = None) -> tuple:
+    """
+    参数化健康度分类器 — 用于进化优化阈值
+
+    Args:
+        verdict: compute_verdict() 输出
+        params: 阈值参数 (None = 使用 DEFAULT_HEALTH_PARAMS)
+
+    Returns:
+        (health, color, emoji)
+        health ∈ {"accumulate", "shaking", "dispatch", "unclear"}
+    """
+    p = dict(DEFAULT_HEALTH_PARAMS)
+    if params:
+        p.update(params)
+
     action = verdict.get("action", "观望")
     scores = verdict.get("scores", {}) or {}
     lock = scores.get("lock", [0, 6])[0] if isinstance(scores.get("lock"), (list, tuple)) else 0
     dispatch = scores.get("dispatch", 0) or 0
     div_strong = scores.get("divergence_strong", 0) or 0
 
-    if action == "清仓" or dispatch >= 4:
+    # 顶部信号 (danger)
+    if action == "清仓" or dispatch >= p["dispatch_threshold"]:
         return ("dispatch", "#ef4444", "🔴")
+    # 减仓信号
     if action == "减仓":
         return ("shaking", "#eab308", "🟡")
+    # 持有 + 强锁仓
     if action == "持有":
-        if lock >= 5 or (lock >= 3 and div_strong >= 1):
+        if lock >= p["lock_for_accumulate"]:
+            return ("accumulate", "#22c55e", "🟢")
+        if lock >= p["lock_for_accumulate_with_div"] and div_strong >= p["min_div_strong"]:
             return ("accumulate", "#22c55e", "🟢")
         return ("shaking", "#eab308", "🟡")
+    # 观望 + 还不错的锁仓
     if action == "观望":
-        if lock >= 4:
+        if lock >= p["lock_for_watch_accumulate"]:
             return ("accumulate", "#22c55e", "🟢")
         return ("unclear", "#94a3b8", "⚪")
     return ("unclear", "#94a3b8", "⚪")
