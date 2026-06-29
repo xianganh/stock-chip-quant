@@ -371,6 +371,15 @@ function buildMiniTable(headers, rows) {
 }
 function fv(v){if(v==null||v==='')return'—';if(typeof v==='number')return Number.isInteger(v)?v.toString():v.toFixed(2);return String(v);}
 function fp(v){if(v==null)return'—';const n=Number(v);return isNaN(n)?v:(n>0?'+':'')+n.toFixed(2)+'%';}
+function formatPeakPositions(latest) {
+    const positions = latest.peak_positions || [];
+    const heights = latest.peak_heights || [];
+    if (!positions.length) return '<span class="text-muted">无峰位数据</span>';
+    return positions.map((p, i) => {
+        const h = heights[i] != null ? heights[i] + '%' : '?';
+        return `<span style="display:inline-block;margin:2px 4px;padding:2px 8px;background:rgba(59,130,246,0.12);border-radius:12px;font-size:0.82rem">P${i+1} ${fv(p)}元 (${h})</span>`;
+    }).join('');
+}
 function trend5(records,key){
     if(records.length<5)return'—';
     const s=records.slice(-5);const d=s[s.length-1][key]-s[0][key];if(d>3)return`<b class="text-green">↑ ${d.toFixed(1)}</b> 快速集中`;
@@ -387,19 +396,29 @@ function trend3(records,key){
 // ── 筹码结构卡片 ──
 function renderChipCard(d) {
     const ce=d.chip_evolution||{},records=ce.daily_records||[],latest=records[records.length-1]||{};
+    const peaksBelow = latest.peaks_below_close != null ? latest.peaks_below_close : '—';
+    const peakGapPct = latest.gap_pct != null ? fp(latest.gap_pct) : '—';
+    const w70 = latest.width_70 != null ? fv(latest.width_70)+' 元' : '—';
+    const p1Dom = latest.p1_dominance != null ? fp(latest.p1_dominance) : '—';
+    const peakEntropy = latest.peak_entropy != null ? fv(latest.peak_entropy) : '—';
     const rows=[
         ['P1 主峰位<span class="t-abbr">p1</span>', fv(latest.p1)+' 元', '筹码最集中的价格位置, 主力成本区参考'],
         ['P1 主峰占比<span class="t-abbr">p1_pct</span>', fp(latest.p1_pct), 'P1峰筹码占总筹码比例<br><b>≥12%</b> 强势控盘 | <b>≥7%</b> 有存在感 | <b>&lt;7%</b> 缺乏主力'],
+        ['P1 主峰主导度<span class="t-abbr">p1_dominance</span>', p1Dom, '主峰 vs 其他峰总占比, &gt;50% 极度单一<br>与 p1_pct 区别: 是否绝对碾压其余筹码'],
         ['P2 次峰位<span class="t-abbr">p2</span>', fv(latest.p2)+' 元', '次要筹码集中价位'],
         ['P3 第三峰位<span class="t-abbr">p3</span>', fv(latest.p3)+' 元', '第三筹码集中价位'],
+        ['P1↔P2 间隔<span class="t-abbr">gap_pct</span>', peakGapPct, '主峰与次峰价格间距 %<br>小间距→中继形态 / 大间距→突破形态'],
         ['TPC 三峰集中度<span class="t-abbr">tpc</span>', fp(latest.tpc), 'P1+P2+P3 筹码占比总和<br><b>≥25%</b> 高度集中 | <b>15-25%</b> 中等 | <b>&lt;15%</b> 分散'],
         ['Top5 集中度<span class="t-abbr">top5</span>', fp(latest.top5), '前5个价位筹码占比'],
         ['Winner 获利盘<span class="t-abbr">winner</span>', fp(latest.winner), '当前价以上盈利筹码比例<br><b>&gt;80%</b> 有获利回吐压力 | <b>&lt;20%</b> 套牢盘重'],
+        ['成本下方峰数<span class="t-abbr">peaks_below_close</span>', peaksBelow, '当前价以下的主峰数<br><b>≥1</b> 主力可能在低位吸纳'],
         ['加权平均成本<span class="t-abbr">weight_avg</span>', fv(latest.weight_avg)+' 元', '所有筹码的加权平均成本线'],
+        ['70% 集中宽度<span class="t-abbr">width_70</span>', w70, '70%筹码的价格区间宽度<br>用于监测主力收集松紧度'],
         ['90% 集中宽度<span class="t-abbr">width_90</span>', fv(latest.width_90)+' 元', '90%筹码分布的价格区间宽度<br>越窄越集中'],
         ['分布偏度<span class="t-abbr">skewness</span>', fv(latest.skewness), '<b>&gt;0</b> 筹码右偏(高位筹码多)<br><b>&lt;0</b> 左偏(低位筹码集中)'],
         ['分布峰度<span class="t-abbr">kurtosis</span>', fv(latest.kurtosis), '<b>&gt;3</b> 尖峰(筹码尖锐集中)<br><b>&lt;3</b> 扁平(筹码分散)'],
         ['分布熵<span class="t-abbr">entropy</span>', fv(latest.entropy), '越小越有序集中, 越大越无序分散'],
+        ['峰位熵<span class="t-abbr">peak_entropy</span>', peakEntropy, '仅峰附近的局部熵<br>识别"尖锐主峰+分散噪声"格局'],
         ['筹码形态<span class="t-abbr">morphology</span>', latest.morphology||'—', '单峰密集/双峰/多峰发散/高位密集/低位密集'],
         ['峰个数<span class="t-abbr">n_peaks</span>', latest.n_peaks||'—', '检测到的主要筹码峰个数'],
     ];
@@ -415,6 +434,7 @@ function renderChipCard(d) {
     const html=`
         <div class="dim-card-header"><span class="dim-icon">🔬</span><span class="dim-title">筹码结构分析</span><span class="dim-sub">${latest.morphology||'—'}</span></div>
         <div class="dim-card-body">${buildMiniTable(['指标','数值','含义'],rows)}</div>
+        <div class="dim-subsection"><div class="dim-subtitle">🎯 检测到的峰位</div><div class="dim-conclusion">${formatPeakPositions(latest)}</div></div>
         <div class="dim-subsection"><div class="dim-subtitle">📝 结论</div><div class="dim-conclusion">${conclusion}</div></div>`;
     document.getElementById('chipCard').innerHTML=html;
 }
