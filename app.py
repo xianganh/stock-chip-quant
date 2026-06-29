@@ -403,6 +403,80 @@ def api_replay_run():
     })
 
 
+@app.route("/review/stock/<ts_code>")
+def review_stock_page(ts_code):
+    """单股深挖复盘 — K 线 + 逐日健康度 + 后验验证"""
+    return render_template("review_stock.html", ts_code=ts_code)
+
+
+@app.route("/api/review/stock/<ts_code>", methods=["GET"])
+def api_review_stock(ts_code):
+    """
+    单股逐日复盘数据 — 供 K 线复盘页面使用
+
+    Query:
+        account: 账户名 (衡祥安 / 邱磊); 不传则取该股全部 position
+    """
+    from utils import normalize_ts_code
+    from database.models import Position
+    from engine.daily_review_engine import (
+        DailyReviewEngine, find_position_range,
+    )
+
+    ts_code = normalize_ts_code(ts_code)
+    account = request.args.get("account", "").strip()
+
+    bare_code = ts_code.rsplit(".", 1)[0] if "." in ts_code else ts_code
+    query = Position.query.filter(Position.ts_code == bare_code)
+    if account:
+        query = query.filter_by(account=account)
+    positions = query.order_by(Position.entry_date).all()
+
+    if not positions:
+        return jsonify({"error": f"未找到 {ts_code} 的持仓记录" + (f" (账户 {account})" if account else "")})
+
+    rng = find_position_range(positions)
+    if not rng:
+        return jsonify({"error": "无法确定复盘时间窗口"})
+
+    name = positions[0].name or ts_code
+    account_used = account or positions[0].account or ""
+
+    try:
+        engine = DailyReviewEngine(verbose=False)
+        result = engine.review_position_range(
+            ts_code=ts_code, account=account_used,
+            start_date=rng[0], end_date=rng[1],
+        )
+    except Exception as e:
+        return jsonify({"error": f"复盘引擎异常: {e}"})
+
+    if "error" in result:
+        return jsonify(result)
+
+    trades = []
+    for p in positions:
+        trades.append({
+            "date": p.entry_date, "type": "buy",
+            "price": float(p.entry_price or 0),
+            "qty": int(p.qty or 0),
+            "note": f"入场 @ {p.entry_price}",
+        })
+        if p.exit_date:
+            trades.append({
+                "date": p.exit_date, "type": "sell",
+                "price": float(p.exit_price or 0),
+                "qty": int(p.qty or 0),
+                "note": f"出场 @ {p.exit_price} (PnL {(p.realized_pnl_pct or 0):+.2f}%)",
+            })
+
+    result["name"] = name
+    result["account"] = account_used
+    result["trades"] = trades
+    result["position_count"] = len(positions)
+    return jsonify(result)
+
+
 @app.after_request
 def add_no_cache_headers(response):
     """防止浏览器/IDE Preview 缓存分析页和 API"""

@@ -1,0 +1,506 @@
+{% extends "base.html" %}
+{% block title %}单股复盘 - {{ ts_code }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.stock-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
+.stock-header h2 { margin: 0; }
+.stock-header .filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.stock-header select, .stock-header input { background: var(--bg); color: var(--fg); border: 1px solid var(--border); padding: 0.35rem 0.6rem; border-radius: 6px; }
+.chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.8rem; margin-bottom: 1rem; }
+.summary-tile { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem; text-align: center; }
+.summary-tile .label { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.summary-tile .value { font-size: 1.4rem; font-weight: 700; }
+.legend-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
+.legend-chip { display: inline-flex; align-items: center; gap: 0.3rem; }
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.applic-table { width: 100%; font-size: 0.88rem; border-collapse: collapse; }
+.applic-table th, .applic-table td { padding: 0.45rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); }
+.applic-table th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; }
+.applic-table tr:hover { background: rgba(255,255,255,0.04); }
+.verdict-agree { color: #22c55e; font-weight: 600; }
+.verdict-disagree { color: #ef4444; font-weight: 600; }
+.verdict-neutral { color: var(--muted); }
+#detail-panel { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; min-height: 120px; font-size: 0.9rem; }
+#detail-panel .empty { color: var(--muted); text-align: center; padding: 1.5rem; }
+.daily-row { display: grid; grid-template-columns: 100px 80px 1fr 60px; gap: 0.8rem; padding: 0.3rem 0; border-bottom: 1px dashed var(--border); font-size: 0.85rem; }
+.daily-row.win { color: #22c55e; }
+.daily-row.lose { color: #ef4444; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="stock-header">
+    <h2>🎯 单股逐日复盘 — <span id="title-code">{{ ts_code }}</span> <small id="title-name" style="color: var(--muted);"></small></h2>
+    <div class="filters">
+      <a href="/review" style="color: var(--accent);">← 返回多股统计</a>
+      <select id="account-filter" onchange="loadData()">
+        <option value="">全部账户</option>
+        <option value="衡祥安" selected>衡祥安</option>
+        <option value="邱磊">邱磊</option>
+      </select>
+      <button class="btn btn-sm" style="background: var(--accent); color: white;" onclick="loadData()">🔄 刷新</button>
+    </div>
+    <input type="hidden" id="ts-code" value="{{ ts_code }}">
+  </div>
+
+  <!-- 概览 -->
+  <div class="summary-grid">
+    <div class="summary-tile"><div class="label">交易日</div><div class="value" id="stat-days">-</div></div>
+    <div class="summary-tile"><div class="label">有指标</div><div class="value" id="stat-indicators">-</div></div>
+    <div class="summary-tile"><div class="label">吸筹日</div><div class="value verdict-agree" id="stat-acc">-</div></div>
+    <div class="summary-tile"><div class="label">派发日</div><div class="value" style="color:#ef4444;" id="stat-disp">-</div></div>
+    <div class="summary-tile"><div class="label">后验准确</div><div class="value verdict-agree" id="stat-agree">-</div></div>
+    <div class="summary-tile"><div class="label">后验误判</div><div class="value" style="color:#ef4444;" id="stat-disagree">-</div></div>
+  </div>
+
+  <!-- K 线主图 + 副图 -->
+  <div class="chart-card">
+    <div class="legend-row">
+      <span class="legend-chip"><span class="legend-dot" style="background:#22c55e;"></span> 吸筹中</span>
+      <span class="legend-chip"><span class="legend-dot" style="background:#eab308;"></span> 震荡洗盘</span>
+      <span class="legend-chip"><span class="legend-dot" style="background:#ef4444;"></span> 派发出货</span>
+      <span class="legend-chip"><span class="legend-dot" style="background:#94a3b8;"></span> 不明朗</span>
+      <span style="margin-left:auto;">▲ 买入 &nbsp; ▼ 卖出 &nbsp; · 悬停查看详情</span>
+    </div>
+    <div id="kline-chart" style="height: 600px;"></div>
+  </div>
+
+  <!-- 当日详情面板 -->
+  <div class="chart-card">
+    <h6>📌 当日详情 <small style="color: var(--muted);">(点击 K 线某日查看)</small></h6>
+    <div id="detail-panel">
+      <div class="empty">点击上方 K 线图的某一天查看该日算法判断和后验结果</div>
+    </div>
+  </div>
+
+  <!-- 适用性统计 -->
+  <div class="row">
+    <div class="col-md-6">
+      <div class="chart-card">
+        <h6>🔧 锁仓评分准确率</h6>
+        <table class="applic-table" id="lock-applic">
+          <thead><tr><th>评分</th><th>样本</th><th>准确</th><th>误判</th><th>准确率</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="chart-card">
+        <h6>🔧 健康度判断准确率</h6>
+        <table class="applic-table" id="health-applic">
+          <thead><tr><th>健康度</th><th>样本</th><th>准确</th><th>误判</th><th>准确率</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 指标检验模块 — 30+ 指标逐个后验 -->
+  <div class="chart-card">
+    <h6>🧪 逐指标后验检验 <small style="color:var(--muted);">— 找出哪些指标在你这只股票上真有预测力</small></h6>
+    <div id="indicator-test-wrap">
+      <div class="empty" style="text-align:center; padding:2rem; color:var(--muted);">加载中...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _data = null;
+
+async function loadData() {
+  const code = document.getElementById('ts-code').value;
+  const account = document.getElementById('account-filter').value;
+  const url = `/api/review/stock/${code}` + (account ? `?account=${encodeURIComponent(account)}` : '');
+
+  try {
+    document.getElementById('detail-panel').innerHTML = '<div class="empty">加载中...</div>';
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (data.error) {
+      document.getElementById('detail-panel').innerHTML = `<div class="empty">❌ ${data.error}</div>`;
+      return;
+    }
+
+    _data = data;
+    document.getElementById('title-name').textContent = data.name || '';
+    document.getElementById('title-code').textContent = data.ts_code;
+
+    renderSummary(data);
+    renderKline(data);
+    renderApplicability(data);
+    renderIndicatorTest(data);
+  } catch (e) {
+    document.getElementById('detail-panel').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
+  }
+}
+
+function renderSummary(data) {
+  const inds = data.indicators || [];
+  const verfs = data.verification || [];
+  document.getElementById('stat-days').textContent = data.dates.length;
+  document.getElementById('stat-indicators').textContent = inds.length;
+
+  const healthCount = h => inds.filter(i => i.health === h).length;
+  document.getElementById('stat-acc').textContent = healthCount('accumulate');
+  document.getElementById('stat-disp').textContent = healthCount('dispatch');
+
+  const verdictCount = v => verfs.filter(x => x.verdict === v).length;
+  document.getElementById('stat-agree').textContent = verdictCount('agree');
+  document.getElementById('stat-disagree').textContent = verdictCount('disagree');
+}
+
+function renderKline(data) {
+  const fmtDate = s => {
+    if (!s || s.length !== 8) return s;
+    return s.slice(0, 4) + '-' + s.slice(4, 6) + '-' + s.slice(6, 8);
+  };
+  const plotDates = (data.dates || []).map(fmtDate);
+
+  const indicatorMap = {};
+  (data.indicators || []).forEach(i => { indicatorMap[i.date] = i; });
+  const verdictMap = {};
+  (data.verification || []).forEach(v => { verdictMap[v.date] = v; });
+
+  const trades = (data.trades || []).map(t => ({ ...t, plotDate: fmtDate(t.date) }));
+  const buys = trades.filter(t => t.type === 'buy');
+  const sells = trades.filter(t => t.type === 'sell');
+
+  const traces = [];
+
+  traces.push({
+    type: 'candlestick',
+    x: plotDates,
+    open: data.ohlc.open, high: data.ohlc.high,
+    low: data.ohlc.low, close: data.ohlc.close,
+    xaxis: 'x', yaxis: 'y',
+    name: 'K线',
+    increasing: { line: { color: '#22c55e' }, fillcolor: '#22c55e' },
+    decreasing: { line: { color: '#ef4444' }, fillcolor: '#ef4444' },
+    whiskerwidth: 0.5,
+    customdata: plotDates.map(pd => {
+      const rawDate = data.dates[plotDates.indexOf(pd)];
+      const i = indicatorMap[rawDate] || {};
+      const v = verdictMap[rawDate] || {};
+      return [
+        i.health_label || '-',
+        i.lock_score != null ? `${i.lock_score}/6` : '-',
+        i.dispatch_score != null ? `D${i.dispatch_score}` : '-',
+        i.tpc != null ? i.tpc.toFixed(1) : '-',
+        i.action || '-',
+        v.verdict || '-',
+      ];
+    }),
+    hovertemplate:
+      '<b>%{x}</b><br>' +
+      'O:%{open} H:%{high} L:%{low} C:%{close}<br>' +
+      '健康度: <b>%{customdata[0]}</b> | Action: %{customdata[4]}<br>' +
+      'Lock: %{customdata[1]} Disp: %{customdata[2]} TPC: %{customdata[3]}<br>' +
+      '后验: %{customdata[5]}<extra></extra>',
+    showlegend: false,
+  });
+
+  if (buys.length) {
+    traces.push({
+      type: 'scatter', mode: 'markers',
+      x: buys.map(t => t.plotDate),
+      y: buys.map(t => {
+        const idx = data.dates.indexOf(t.date);
+        return idx >= 0 ? data.ohlc.low[idx] * 0.992 : t.price;
+      }),
+      xaxis: 'x', yaxis: 'y',
+      name: '买入',
+      marker: { symbol: 'triangle-up', size: 14, color: '#22c55e', line: { color: '#0f172a', width: 1 } },
+      text: buys.map(t => t.note),
+      hovertemplate: '%{text}<extra></extra>',
+    });
+  }
+  if (sells.length) {
+    traces.push({
+      type: 'scatter', mode: 'markers',
+      x: sells.map(t => t.plotDate),
+      y: sells.map(t => {
+        const idx = data.dates.indexOf(t.date);
+        return idx >= 0 ? data.ohlc.high[idx] * 1.008 : t.price;
+      }),
+      xaxis: 'x', yaxis: 'y',
+      name: '卖出',
+      marker: { symbol: 'triangle-down', size: 14, color: '#ef4444', line: { color: '#0f172a', width: 1 } },
+      text: sells.map(t => t.note),
+      hovertemplate: '%{text}<extra></extra>',
+    });
+  }
+
+  const annotations = [];
+
+  data.dates.forEach((rawDate, idx) => {
+    const ind = indicatorMap[rawDate];
+    const ver = verdictMap[rawDate];
+    if (!ind) return;
+
+    const verdictMark = {
+      agree: '✓', disagree: '✗', neutral: '·', no_data: '?',
+    }[ver?.verdict] || '';
+
+    const verdictColor = {
+      agree: '#22c55e', disagree: '#ef4444',
+      neutral: '#94a3b8', no_data: '#475569',
+    }[ver?.verdict] || '#94a3b8';
+
+    annotations.push({
+      x: plotDates[idx], y: 0,
+      xref: 'x', yref: 'paper',
+      text: `${ind.health_emoji} ${ind.lock_score}/6 D${ind.dispatch_score} <span style="color:${verdictColor};font-weight:bold;">${verdictMark}</span>`,
+      showarrow: false,
+      font: { size: 9, color: ind.health_color },
+      textangle: -90,
+      yanchor: 'top',
+    });
+  });
+
+  const shapes = buildHealthBands(data.dates, indicatorMap, plotDates);
+
+  const layout = {
+    margin: { t: 20, b: 80, l: 50, r: 30 },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { color: '#94a3b8', size: 11 },
+    xaxis: {
+      type: 'category',
+      rangeslider: { visible: false },
+      gridcolor: '#1e293b',
+      tickangle: -45,
+      nticks: 15,
+      domain: [0, 1],
+    },
+    yaxis: {
+      domain: [0.20, 0.95], title: '价格',
+      gridcolor: '#1e293b', fixedrange: false,
+      autorange: true,
+    },
+    shapes: shapes,
+    annotations: annotations,
+    hovermode: 'x unified',
+    dragmode: 'zoom',
+    showlegend: true,
+    legend: { orientation: 'h', y: 1.02 },
+  };
+
+  const config = {
+    responsive: true,
+    displaylogo: false,
+    scrollZoom: true,
+    modeBarButtonsToRemove: ['lasso2d'],
+  };
+
+  Plotly.newPlot('kline-chart', traces, layout, config);
+
+  document.getElementById('kline-chart').on('plotly_click', function(evt) {
+    const point = evt.points && evt.points[0];
+    if (!point) return;
+    showDayDetail(point.x);
+  });
+}
+
+function buildHealthBands(dates, indicatorMap, plotDates) {
+  const shapes = [];
+  let segStart = null, segColor = null;
+
+  const flush = (start, end, color) => {
+    if (!start || !end || !color) return;
+    shapes.push({
+      type: 'rect', xref: 'x', yref: 'paper',
+      x0: start, x1: end, y0: 0.20, y1: 0.95,
+      fillcolor: color, opacity: 0.10,
+      line: { width: 0 }, layer: 'below',
+    });
+  };
+
+  for (let i = 0; i < dates.length; i++) {
+    const rawDate = dates[i];
+    const pd = plotDates[i];
+    const ind = indicatorMap[rawDate];
+    const color = ind ? ind.health_color : null;
+    if (color !== segColor) {
+      flush(segStart, pd, segColor);
+      segStart = pd;
+      segColor = color;
+    }
+  }
+  const lastPd = plotDates[plotDates.length - 1];
+  flush(segStart, lastPd, segColor);
+  return shapes;
+}
+
+function showDayDetail(date) {
+  if (!_data) return;
+  const ind = (_data.indicators || []).find(i => i.date === date);
+  const ver = (_data.verification || []).find(v => v.date === date);
+  const trade = (_data.trades || []).find(t => t.date === date);
+  const dateIdx = _data.dates.indexOf(date);
+  const close = dateIdx >= 0 ? _data.ohlc.close[dateIdx] : null;
+
+  let html = `<div style="border-bottom:1px solid var(--border); padding-bottom:0.5rem; margin-bottom:0.5rem;">
+    <b style="font-size:1.05rem;">${date}</b> · 收盘 ${close || '-'}`;
+
+  if (ind) {
+    html += ` &nbsp;|&nbsp; <span style="color:${ind.health_color}; font-weight:600;">${ind.health_emoji} ${ind.health_label}</span>
+      &nbsp;|&nbsp; 锁仓 ${ind.lock_score}/6 · 派发 D${ind.dispatch_score} · TPC ${ind.tpc.toFixed(1)}
+      &nbsp;|&nbsp; Action: <b>${ind.action}</b> (${ind.confidence}%)`;
+  } else {
+    html += ` &nbsp;|&nbsp; <span style="color:var(--muted);">无算法指标 (数据不足)</span>`;
+  }
+  if (trade) {
+    html += ` &nbsp;|&nbsp; <b style="color:${trade.type === 'buy' ? '#22c55e' : '#ef4444'};">
+      ${trade.type === 'buy' ? '▲ 买入' : '▼ 卖出'} ${trade.qty} @ ${trade.price}</b>`;
+  }
+  html += `</div>`;
+
+  if (ind && ind.reasons && ind.reasons.length) {
+    html += `<div style="margin-bottom:0.5rem;"><b style="color:var(--muted);">算法理由:</b><ul style="margin:0.3rem 0 0 1.2rem; padding:0;">`;
+    ind.reasons.forEach(r => { html += `<li style="font-size:0.85rem;">${r}</li>`; });
+    html += `</ul></div>`;
+  }
+
+  if (ver) {
+    const vColor = ver.verdict === 'agree' ? '#22c55e' :
+                   ver.verdict === 'disagree' ? '#ef4444' : 'var(--muted)';
+    const vText = { agree: '✅ 判断准确', disagree: '❌ 判断误判', neutral: '⚪ 中性', no_data: '⏳ 数据不足' }[ver.verdict] || ver.verdict;
+    html += `<div style="margin-bottom:0.5rem;"><b style="color:var(--muted);">后验结论:</b>
+      <span style="color:${vColor}; font-weight:600;">${vText}</span> · ${ver.reason}</div>`;
+
+    html += `<div><b style="color:var(--muted);">多窗口走势:</b><div style="margin-top:0.3rem;">`;
+    for (const [w, r] of Object.entries(ver.windows)) {
+      const labelCn = { rise: '主力拉升', fall: '大跌', shake: '震荡', no_data: '无数据' }[r.label] || r.label;
+      const labelColor = r.label === 'rise' ? '#22c55e' : r.label === 'fall' ? '#ef4444' : 'var(--muted)';
+      const burstMark = r.burst_detected ? ' <span style="color:#f97316;">⚡爆发</span>' : '';
+      const chgStr = r.change_pct != null ? ` (${r.change_pct > 0 ? '+' : ''}${r.change_pct}%)` : '';
+      html += `<div class="daily-row">
+        <span><b>${w}</b></span>
+        <span style="color:${labelColor};">${labelCn}</span>
+        <span style="color:var(--muted);">${chgStr}${burstMark}</span>
+        <span></span>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  document.getElementById('detail-panel').innerHTML = html;
+}
+
+function renderApplicability(data) {
+  const appl = data.applicability || {};
+
+  const renderTable = (tableId, rows) => {
+    const tbody = document.querySelector(`#${tableId} tbody`);
+    tbody.innerHTML = '';
+    if (!rows || !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--muted); padding:1rem;">无数据</td></tr>';
+      return;
+    }
+    for (const r of rows) {
+      const accClass = r.accuracy >= 60 ? 'verdict-agree' : r.accuracy > 0 && r.accuracy <= 40 ? 'verdict-disagree' : 'verdict-neutral';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><b>${r.bucket}</b></td>
+        <td>${r.total}</td>
+        <td style="color:#22c55e;">${r.agree}</td>
+        <td style="color:#ef4444;">${r.disagree}</td>
+        <td class="${accClass}">${r.accuracy.toFixed(0)}%</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  };
+
+  renderTable('lock-applic', appl.lock_score);
+  renderTable('health-applic', appl.health);
+}
+
+function renderIndicatorTest(data) {
+  const t = data.indicator_test;
+  const wrap = document.getElementById('indicator-test-wrap');
+  if (!t || t.error) {
+    wrap.innerHTML = `<div class="empty" style="text-align:center; padding:2rem; color:var(--muted);">
+      📊 指标检验需要更多数据, 当前样本: ${t ? t.sample_count || 0 : 0} 个.
+      建议: 跨多只股票累积后再调阈值.</div>`;
+    return;
+  }
+
+  const html = [];
+  html.push(`<div style="margin-bottom:0.8rem; color:var(--muted); font-size:0.85rem;">
+    📊 样本数 <b>${t.sample_count}</b> · 后验窗口 <b>${t.verdict_source}</b> ·
+    含义: 每一档是"指标取值区间"对应的未来 T+10 走势分布 (rise=主力拉升 / fall=大跌 / shake=震荡)
+  </div>`);
+
+  for (const [key, cat] of Object.entries(t.categories || {})) {
+    html.push(`<div class="chart-card" style="margin-bottom:1rem;">
+      <h6 style="color:var(--accent);">${cat.title}</h6>`);
+
+    if (key === 'chip_structure') {
+      // 连续指标用大表, 5 档分位 + rise/fall 比例
+      html.push(`<table class="applic-table">
+        <thead><tr><th>指标</th><th>档位</th><th>n</th>
+          <th style="color:#22c55e;">rise ↑</th><th style="color:#ef4444;">fall ↓</th><th>shake</th>
+        </tr></thead><tbody>`);
+      for (const x of cat.tests) {
+        const buckets = x.best_buckets || [];
+        for (let i = 0; i < buckets.length; i++) {
+          const b = buckets[i];
+          const r = b.rise || 0, f = b.fall || 0, s = b.shake || 0;
+          const tot = r + f + s;
+          const maxV = Math.max(r, f, s, 1);
+          html.push(`<tr>
+            <td rowspan="${buckets.length}"><b>${x.indicator}</b><br><small style="color:var(--muted);">${x.desc || ''}</small></td>
+            <td>${b.label}</td>
+            <td>${b.count}</td>
+            <td>
+              <div style="display:flex; align-items:center; gap:0.3rem;">
+                <span style="width:30px; text-align:right;">${r}</span>
+                <span style="flex:1; background:rgba(34,197,94,0.15); height:6px; border-radius:3px; position:relative;">
+                  <span style="position:absolute; left:0; top:0; height:100%; background:#22c55e; width:${r/maxV*100}%; border-radius:3px;"></span>
+                </span>
+                <span style="width:45px; color:#22c55e; font-size:0.8rem;">${b.rise_rate}%</span>
+              </div>
+            </td>
+            <td>
+              <div style="display:flex; align-items:center; gap:0.3rem;">
+                <span style="width:30px; text-align:right;">${f}</span>
+                <span style="flex:1; background:rgba(239,68,68,0.15); height:6px; border-radius:3px; position:relative;">
+                  <span style="position:absolute; left:0; top:0; height:100%; background:#ef4444; width:${f/maxV*100}%; border-radius:3px;"></span>
+                </span>
+                <span style="width:45px; color:#ef4444; font-size:0.8rem;">${b.fall_rate}%</span>
+              </div>
+            </td>
+            <td>${s}</td>
+          </tr>`);
+          if (i < buckets.length - 1) html.push(`<tr style="display:none;"></tr>`);
+        }
+      }
+      html.push(`</tbody></table>`);
+    } else {
+      html.push(`<table class="applic-table">
+        <thead><tr><th>指标</th><th>✓条件成立</th><th>✗条件不成立</th><th>差异</th></tr></thead><tbody>`);
+      for (const x of cat.tests) {
+        const t1 = x.true_count > 0 ? `<span style="color:#22c55e;">${x.true_rise_rate}%</span> (n=${x.true_count})` : `<span style="color:var(--muted);">无样本</span>`;
+        const t2 = x.false_count > 0 ? `${x.false_rise_rate}% (n=${x.false_count})` : '-';
+        const diff = x.true_count > 0 ? `<b style="color:${x.delta > 0 ? '#22c55e' : '#94a3b8'};">${x.delta > 0 ? '+' : ''}${x.delta}%</b>` : '-';
+        html.push(`<tr>
+          <td><b>${x.indicator}</b><br><small style="color:var(--muted);">${x.desc || ''}</small></td>
+          <td>${t1}</td>
+          <td>${t2}</td>
+          <td>${diff}</td>
+        </tr>`);
+      }
+      html.push(`</tbody></table>`);
+    }
+    html.push(`</div>`);
+  }
+  wrap.innerHTML = html.join('');
+}
+
+loadData();
+</script>
+{% endblock %}
