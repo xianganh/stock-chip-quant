@@ -584,6 +584,220 @@ def get_score_label(score: int) -> str:
 
 
 # ═══════════════════════════════════════════════════════
+# 2.5 筹码峰演化过程指标 (v3: 2026-06-30 新增)
+# 区别于静态快照，全部指标需 >=2 天历史，描述"筹码如何变化"
+# ═══════════════════════════════════════════════════════
+
+
+def compute_evolution_metrics(
+    sorted_daily_metrics: List[Dict],
+    cur_idx: int,
+    windows: tuple = (3, 7, 14),
+) -> Optional[Dict]:
+    """
+    基于 sorted_daily_metrics 计算 7 项演化过程指标。
+
+    指标说明：
+      1. peak_shift_14d  : 14天主峰价格迁移方向（%），正=上移（吸筹上移）
+      2. peak_shift_streak: 连续多少天主峰价格同向移动
+      3. tpc_streak      : 连续多少天 TPC >= 15%（筹码集中持续度）
+      4. conv_path_score : 近14天形态转移得分，收敛为正、发散为负
+      5. dense_days      : 密集类形态（单峰密集/双峰密集）持续天数
+      6. res_melt_7d     : 上方阻力峰筹码量 7日消融速率（%），正=正在被吃掉
+      7. evol_consistency: 3/7/14日 v1 score 方向一致性，-3(全负) ~ +3(全正)
+
+    Returns: 7 指标 dict，历史不足返回 None
+    """
+    if cur_idx < 2:
+        return None
+    w3, w7, w14 = windows
+    cur = sorted_daily_metrics[cur_idx]
+    cur_p1 = float(cur.get('p1') or 0.0)
+    if cur_p1 <= 0:
+        return None
+
+    def _arr(field, n):
+        start = max(0, cur_idx - n + 1)
+        vals = []
+        for i in range(start, cur_idx + 1):
+            v = sorted_daily_metrics[i].get(field)
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                continue
+            try:
+                vals.append(float(v))
+            except (ValueError, TypeError):
+                vals.append(v)
+        return vals
+
+    # ---------- (1) peak_shift_14d: 主峰迁移 % ----------
+    p1_14d = _arr('p1', w14)
+    peak_shift_14d = 0.0
+    if len(p1_14d) >= 8:
+        ref = p1_14d[0]
+        if ref > 0:
+            peak_shift_14d = round((p1_14d[-1] - ref) / ref * 100, 2)
+
+    # ---------- (2) peak_shift_streak: 连续同向天数 ----------
+    p1_all = [float(x.get('p1') or 0.0) for x in sorted_daily_metrics[:cur_idx + 1] if x.get('p1')]
+    peak_shift_streak = 0
+    if len(p1_all) >= 3:
+        i = len(p1_all) - 1
+        last_dir = 0
+        while i >= 1:
+            d = p1_all[i] - p1_all[i - 1]
+            if abs(d) < 0.01:
+                break
+            dir_ = 1 if d > 0 else -1
+            if last_dir == 0:
+                last_dir = dir_
+                peak_shift_streak = 1
+            elif dir_ == last_dir:
+                peak_shift_streak += 1
+            else:
+                break
+            i -= 1
+
+    # ---------- (3) tpc_streak: TPC >= 15% 连续天数 ----------
+    tpc_all = [float(x.get('tpc') or 0.0) for x in sorted_daily_metrics[:cur_idx + 1] if x.get('tpc') is not None]
+    tpc_streak = 0
+    for t in reversed(tpc_all):
+        if t >= 15:
+            tpc_streak += 1
+        else:
+            break
+
+    # ---------- (4) conv_path_score: 14天形态转移得分 ----------
+    morphs_14 = _arr('morphology', w14)
+    CONVERGENT = ('单峰密集', '双峰密集', '双峰密集(窄)')
+    DIVERGENT = ('多峰发散', '三峰分布', '三峰均衡', '双峰发散(宽)')
+    conv_path_score = 0
+    if len(morphs_14) >= 8:
+        prev = morphs_14[0]
+        for m in morphs_14[1:]:
+            if m in CONVERGENT and prev not in CONVERGENT:
+                conv_path_score += 2
+            elif m in DIVERGENT and prev not in DIVERGENT:
+                conv_path_score -= 2
+            elif m in CONVERGENT:
+                conv_path_score += 0.3
+            elif m in DIVERGENT:
+                conv_path_score -= 0.3
+            prev = m
+        conv_path_score = round(conv_path_score, 1)
+
+    # ---------- (5) dense_days: 密集类形态连续天数 ----------
+    morphs_all = [x.get('morphology', '') for x in sorted_daily_metrics[:cur_idx + 1]]
+    dense_days = 0
+    for m in reversed(morphs_all):
+        if '密集' in str(m):
+            dense_days += 1
+        else:
+            break
+
+    # ---------- (6) res_melt_7d: 上方阻力峰 7日消融速率 % ----------
+    res_7d = _arr('resistance', w7)
+    res_pct_arr = []
+    for r in res_7d:
+        if isinstance(r, dict) and 'percent' in r and r['percent'] is not None:
+            res_pct_arr.append(float(r['percent']))
+        else:
+            res_pct_arr.append(None)
+    res_melt_7d = 0.0
+    if len(res_pct_arr) >= 4 and res_pct_arr[0] is not None and res_pct_arr[-1] is not None:
+        init = res_pct_arr[0]
+        if init > 0:
+            res_melt_7d = round((init - res_pct_arr[-1]) / init * 100, 2)
+
+    # ---------- (7) evol_consistency: v1 score 多周期方向一致性 ----------
+    sc = _arr('score', w14)
+    evol_consistency = 0
+    for win, w in [(w3, 1), (w7, 1), (w14, 1)]:
+        vv = _arr('score', win)
+        if len(vv) >= max(3, win // 2):
+            first_h = vv[:len(vv)//2]
+            last_h = vv[len(vv)//2:]
+            f, la = sum(first_h)/len(first_h), sum(last_h)/len(last_h)
+            if la - f > 0.5:
+                evol_consistency += 1
+            elif la - f < -0.5:
+                evol_consistency -= 1
+
+    return {
+        'peak_shift_14d': peak_shift_14d,
+        'peak_shift_streak': peak_shift_streak,
+        'tpc_streak': tpc_streak,
+        'conv_path_score': conv_path_score,
+        'dense_days': dense_days,
+        'res_melt_7d': res_melt_7d,
+        'evol_consistency': evol_consistency,
+    }
+
+
+def chip_score_evolution(metrics: Dict) -> float:
+    """
+    演化综合评分 v3 (0~100 分)。
+    完全基于演化过程，不看静态快照的"绝对值"。
+
+    权重设计：
+      30% 主峰迁移 (20% 方向 + 10% 持续性)
+      20% TPC 连续性
+      15% 形态转移得分
+      10% 密集区持续天数
+      10% 阻力消融速率
+      15% 多周期演化一致性
+    """
+    def g(k, df=0.0):
+        v = metrics.get(k)
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return float(df)
+        return float(v)
+
+    def nrm(v, lo, hi, invert=False):
+        rng = hi - lo
+        if rng <= 0:
+            return 50.0
+        x = (float(v) - lo) / rng
+        if invert:
+            x = 1 - x
+        return max(0.0, min(100.0, x * 100))
+
+    # (1) peak_shift_14d: -5%~+10% 映射到 0~100，上移=加分
+    ps = nrm(g('peak_shift_14d'), -5.0, 10.0)
+    # (2) peak_shift_streak: 0~7 天 -> 0~100
+    pss = nrm(g('peak_shift_streak'), 0.0, 7.0)
+    # (3) tpc_streak: 0~15 天 -> 0~100
+    tps = nrm(g('tpc_streak'), 0.0, 15.0)
+    # (4) conv_path_score: -5~+8 -> 0~100
+    cps = nrm(g('conv_path_score'), -5.0, 8.0)
+    # (5) dense_days: 0~20 -> 0~100
+    dds = nrm(g('dense_days'), 0.0, 20.0)
+    # (6) res_melt_7d: -30%~+60% 消融率 -> 0~100
+    rmv = nrm(g('res_melt_7d'), -30.0, 60.0)
+    # (7) evol_consistency: -3 ~ +3 -> 0~100
+    ecv = nrm(g('evol_consistency'), -3.0, 3.0)
+
+    score = (
+        0.20 * ps
+      + 0.10 * pss
+      + 0.20 * tps
+      + 0.15 * cps
+      + 0.10 * dds
+      + 0.10 * rmv
+      + 0.15 * ecv
+    )
+    return round(max(0.0, min(100.0, score)), 1)
+
+
+def evolution_grade(v3_score: float) -> tuple:
+    """返回 (中文分级, 颜色class)"""
+    if v3_score >= 78:  return '演化走强 (强)', 'text-green'
+    if v3_score >= 62:  return '演化向好 (中)', 'text-green'
+    if v3_score >= 48:  return '演化中 (弱)',    'text-yellow'
+    if v3_score >= 32:  return '演化转弱',       'text-red'
+    return '演化走弱 (派发)', 'text-red'
+
+
+# ═══════════════════════════════════════════════════════
 # 3. 批量计算
 # ═══════════════════════════════════════════════════════
 
@@ -656,6 +870,22 @@ def compute_all_chip_metrics(chip_data: pd.DataFrame, kline_data: pd.DataFrame,
             result['reasons'] = []
 
         results.append(result)
+
+    # 计算演化过程指标 (需在整条 results 构建完成后，按索引访问)
+    for i, r in enumerate(results):
+        ev = compute_evolution_metrics(results, i)
+        if ev is not None:
+            r.update(ev)
+            r['v3'] = chip_score_evolution(r)
+        else:
+            r['peak_shift_14d'] = None
+            r['peak_shift_streak'] = 0
+            r['tpc_streak'] = 0
+            r['conv_path_score'] = 0.0
+            r['dense_days'] = 0
+            r['res_melt_7d'] = None
+            r['evol_consistency'] = 0
+            r['v3'] = None
 
     return results
 

@@ -45,6 +45,8 @@ def add_stock(sym: str, name: str, category: str, result: dict):
         'v1': result.get('v1', 0),
         'v2': result.get('v2', 0.0),
         'v2_grade': result.get('v2g', '—'),
+        'v3': result.get('v3', 0.0),
+        'v3_grade': result.get('v3g', '—'),
         'total': result.get('tot', 0.0),
         'close': result.get('close', 0.0),
         'tpc': result.get('tpc', 0),
@@ -55,6 +57,13 @@ def add_stock(sym: str, name: str, category: str, result: dict):
         'trend': result.get('trend', '—'),
         'l0': result.get('l0', 0.5),
         'decision': result.get('decision', ''),
+        'peak_shift_14d': result.get('peak_shift_14d'),
+        'peak_shift_streak': result.get('peak_shift_streak', 0),
+        'tpc_streak': result.get('tpc_streak', 0),
+        'conv_path_score': result.get('conv_path_score', 0.0),
+        'dense_days': result.get('dense_days', 0),
+        'res_melt_7d': result.get('res_melt_7d'),
+        'evol_consistency': result.get('evol_consistency', 0),
     }
     save_today(data)
     return data
@@ -70,11 +79,19 @@ def add_batch(stocks_with_results: List[tuple]):
         data['stocks'][key] = {
             'symbol': sym, 'name': name, 'category': cat,
             'v1': r.get('v1', 0), 'v2': r.get('v2', 0.0), 'v2_grade': r.get('v2g', '—'),
+            'v3': r.get('v3', 0.0), 'v3_grade': r.get('v3g', '—'),
             'total': r.get('tot', 0.0), 'close': r.get('close', 0.0),
             'tpc': r.get('tpc', 0), 'winner': r.get('wnr', 0),
             'peaks_below': r.get('pb', 0), 'resistance': r.get('rd'),
             'morphology': r.get('morph', '—'), 'trend': r.get('trend', '—'),
             'l0': r.get('l0', 0.5), 'decision': r.get('decision', ''),
+            'peak_shift_14d': r.get('peak_shift_14d'),
+            'peak_shift_streak': r.get('peak_shift_streak', 0),
+            'tpc_streak': r.get('tpc_streak', 0),
+            'conv_path_score': r.get('conv_path_score', 0.0),
+            'dense_days': r.get('dense_days', 0),
+            'res_melt_7d': r.get('res_melt_7d'),
+            'evol_consistency': r.get('evol_consistency', 0),
         }
     save_today(data)
     return data
